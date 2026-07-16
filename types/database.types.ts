@@ -11,6 +11,8 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
@@ -268,6 +270,68 @@ export type Database = {
         }
         Relationships: []
       }
+      project_dependencies: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          dependency_type: Database["public"]["Enums"]["project_dependency_type"]
+          depends_on_project_id: string
+          id: string
+          note: string | null
+          organization_id: string
+          project_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          dependency_type?: Database["public"]["Enums"]["project_dependency_type"]
+          depends_on_project_id: string
+          id?: string
+          note?: string | null
+          organization_id: string
+          project_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          dependency_type?: Database["public"]["Enums"]["project_dependency_type"]
+          depends_on_project_id?: string
+          id?: string
+          note?: string | null
+          organization_id?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_dependencies_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_dependencies_depends_on_project_id_fkey"
+            columns: ["depends_on_project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_dependencies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_dependencies_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_members: {
         Row: {
           created_at: string
@@ -307,7 +371,9 @@ export type Database = {
       projects: {
         Row: {
           archived_at: string | null
+          attention_mode: Database["public"]["Enums"]["project_attention_mode"]
           blocked_reason: string | null
+          business_impact: string[]
           category: string | null
           created_at: string
           created_by: string | null
@@ -318,13 +384,17 @@ export type Database = {
           focus_level: number
           founder_attention_required: boolean
           health: Database["public"]["Enums"]["project_health"]
+          health_note: string | null
           id: string
           last_activity_at: string
           name: string
           next_review_at: string | null
           organization_id: string
           owner_id: string | null
+          priority_level: Database["public"]["Enums"]["project_priority_level"]
           priority_score: number
+          progress_percent: number
+          review_cadence: Database["public"]["Enums"]["project_review_cadence"]
           slug: string | null
           start_date: string | null
           status: Database["public"]["Enums"]["project_status"]
@@ -337,7 +407,9 @@ export type Database = {
         }
         Insert: {
           archived_at?: string | null
+          attention_mode?: Database["public"]["Enums"]["project_attention_mode"]
           blocked_reason?: string | null
+          business_impact?: string[]
           category?: string | null
           created_at?: string
           created_by?: string | null
@@ -348,13 +420,17 @@ export type Database = {
           focus_level?: number
           founder_attention_required?: boolean
           health?: Database["public"]["Enums"]["project_health"]
+          health_note?: string | null
           id?: string
           last_activity_at?: string
           name: string
           next_review_at?: string | null
           organization_id: string
           owner_id?: string | null
+          priority_level?: Database["public"]["Enums"]["project_priority_level"]
           priority_score?: number
+          progress_percent?: number
+          review_cadence?: Database["public"]["Enums"]["project_review_cadence"]
           slug?: string | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["project_status"]
@@ -367,7 +443,9 @@ export type Database = {
         }
         Update: {
           archived_at?: string | null
+          attention_mode?: Database["public"]["Enums"]["project_attention_mode"]
           blocked_reason?: string | null
+          business_impact?: string[]
           category?: string | null
           created_at?: string
           created_by?: string | null
@@ -378,13 +456,17 @@ export type Database = {
           focus_level?: number
           founder_attention_required?: boolean
           health?: Database["public"]["Enums"]["project_health"]
+          health_note?: string | null
           id?: string
           last_activity_at?: string
           name?: string
           next_review_at?: string | null
           organization_id?: string
           owner_id?: string | null
+          priority_level?: Database["public"]["Enums"]["project_priority_level"]
           priority_score?: number
+          progress_percent?: number
+          review_cadence?: Database["public"]["Enums"]["project_review_cadence"]
           slug?: string | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["project_status"]
@@ -506,7 +588,23 @@ export type Database = {
     Enums: {
       milestone_status: "pending" | "in_progress" | "completed" | "missed"
       org_role: "owner" | "admin" | "member" | "viewer"
-      project_health: "on_track" | "at_risk" | "off_track"
+      project_attention_mode: "founder" | "delegated" | "team" | "no_attention"
+      project_dependency_type: "blocks" | "depends_on" | "related_to"
+      project_health:
+        | "on_track"
+        | "at_risk"
+        | "off_track"
+        | "healthy"
+        | "needs_attention"
+        | "unknown"
+      project_priority_level: "urgent" | "high" | "medium" | "low"
+      project_review_cadence:
+        | "weekly"
+        | "biweekly"
+        | "monthly"
+        | "quarterly"
+        | "milestone_based"
+        | "none"
       project_status:
         | "planning"
         | "active"
@@ -648,7 +746,25 @@ export const Constants = {
     Enums: {
       milestone_status: ["pending", "in_progress", "completed", "missed"],
       org_role: ["owner", "admin", "member", "viewer"],
-      project_health: ["on_track", "at_risk", "off_track"],
+      project_attention_mode: ["founder", "delegated", "team", "no_attention"],
+      project_dependency_type: ["blocks", "depends_on", "related_to"],
+      project_health: [
+        "on_track",
+        "at_risk",
+        "off_track",
+        "healthy",
+        "needs_attention",
+        "unknown",
+      ],
+      project_priority_level: ["urgent", "high", "medium", "low"],
+      project_review_cadence: [
+        "weekly",
+        "biweekly",
+        "monthly",
+        "quarterly",
+        "milestone_based",
+        "none",
+      ],
       project_status: [
         "planning",
         "active",

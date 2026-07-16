@@ -1,20 +1,25 @@
 import { projectsRepository } from '@/repositories/projects.repository';
 import { organizationsRepository } from '@/repositories/organizations.repository';
 import { activityRepository } from '@/repositories/activity.repository';
+import { projectDependenciesRepository } from '@/repositories/project-dependencies.repository';
 import { NotFoundError, BusinessRuleError } from '@/lib/errors';
-import { FOCUS_LEVEL_META, PROJECT_STATUS_META } from '@/features/projects/constants';
+import { FOCUS_LEVEL_META, PROJECT_STATUS_META, HEALTH_META, attentionModeRequiresFounder } from '@/features/projects/constants';
 import {
   createProjectSchema,
   updateProjectSchema,
   updateProjectStatusSchema,
   updateProjectFocusLevelSchema,
   archiveOrParkProjectSchema,
+  createProjectDependencySchema,
+  removeProjectDependencySchema,
   MAX_CRITICAL_PROJECTS,
   type CreateProjectInput,
   type UpdateProjectInput,
   type UpdateProjectStatusInput,
   type UpdateProjectFocusLevelInput,
   type ArchiveOrParkProjectInput,
+  type CreateProjectDependencyInput,
+  type RemoveProjectDependencyInput,
 } from '@/schemas/project.schema';
 import type { Tables, TablesInsert, TablesUpdate, Json } from '@/types/database.types';
 
@@ -58,7 +63,10 @@ async function assertOwnerInOrg(organizationId: string, ownerId: string | undefi
   }
 }
 
-/** camelCase input keys -> snake_case DB columns, only for the fields this service writes. */
+/** camelCase input keys -> snake_case DB columns, only for the fields this service writes.
+ * `founder_attention_required` is deliberately never taken from raw input — it is always
+ * derived from `attentionMode` below, so the two columns can't drift apart (see
+ * ATTENTION_MODE_META / attentionModeRequiresFounder in features/projects/constants.ts). */
 function mapInputToPatch(input: Partial<CreateProjectInput | UpdateProjectInput>): TablesUpdate<'projects'> {
   const patch: TablesUpdate<'projects'> = {};
   if (input.name !== undefined) patch.name = input.name;
@@ -74,18 +82,27 @@ function mapInputToPatch(input: Partial<CreateProjectInput | UpdateProjectInput>
   if (input.startDate !== undefined) patch.start_date = input.startDate ?? null;
   if (input.targetDate !== undefined) patch.target_date = input.targetDate ?? null;
   if (input.nextReviewAt !== undefined) patch.next_review_at = input.nextReviewAt ?? null;
+  if (input.reviewCadence !== undefined) patch.review_cadence = input.reviewCadence;
   if (input.blockedReason !== undefined) patch.blocked_reason = input.blockedReason ?? null;
   if (input.waitingOn !== undefined) patch.waiting_on = input.waitingOn ?? null;
-  if (input.founderAttentionRequired !== undefined) patch.founder_attention_required = input.founderAttentionRequired;
+  if (input.attentionMode !== undefined) {
+    patch.attention_mode = input.attentionMode;
+    patch.founder_attention_required = attentionModeRequiresFounder(input.attentionMode);
+  }
+  if (input.priorityLevel !== undefined) patch.priority_level = input.priorityLevel;
   if (input.priorityScore !== undefined) patch.priority_score = input.priorityScore;
+  if (input.health !== undefined) patch.health = input.health;
+  if (input.healthNote !== undefined) patch.health_note = input.healthNote ?? null;
+  if (input.businessImpact !== undefined) patch.business_impact = input.businessImpact;
+  if (input.progressPercent !== undefined) patch.progress_percent = input.progressPercent;
   return patch;
 }
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Name',
   category: 'Category',
-  description: 'Description',
-  owner_id: 'Owner',
+  description: 'Executive notes',
+  owner_id: 'Executive owner',
   status: 'Status',
   focus_level: 'Focus level',
   desired_outcome: 'Desired outcome',
@@ -95,15 +112,35 @@ const FIELD_LABELS: Record<string, string> = {
   start_date: 'Start date',
   target_date: 'Target date',
   next_review_at: 'Next review',
+  review_cadence: 'Review cadence',
   blocked_reason: 'Blocked reason',
   waiting_on: 'Waiting on',
   founder_attention_required: 'Founder attention required',
+  attention_mode: 'Attention mode',
+  priority_level: 'Priority',
   priority_score: 'Priority score',
+  health: 'Health',
+  health_note: 'Health note',
+  business_impact: 'Business impact',
+  progress_percent: 'Progress',
 };
 
 /** Computes only the fields that actually changed — this is what makes
  * no-op submissions a no-op (empty diff) instead of a hollow activity
  * entry, and what lets activity metadata carry real before/after values. */
+/** Arrays (business_impact) need value comparison, not reference equality —
+ * otherwise a resubmitted-but-unchanged array would always look "changed"
+ * and defeat no-op detection. */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((v, i) => v === sortedB[i]);
+  }
+  return a === b;
+}
+
 function diffPatch(existing: ProjectRow, patch: TablesUpdate<'projects'>) {
   const changedFields: string[] = [];
   const previousValues: Record<string, unknown> = {};
@@ -112,7 +149,7 @@ function diffPatch(existing: ProjectRow, patch: TablesUpdate<'projects'>) {
 
   for (const [key, newValue] of Object.entries(patch)) {
     const existingValue = (existing as Record<string, unknown>)[key];
-    if (existingValue !== newValue) {
+    if (!valuesEqual(existingValue, newValue)) {
       changedFields.push(key);
       previousValues[key] = existingValue;
       newValues[key] = newValue;
@@ -136,11 +173,21 @@ function describeChange(changedFields: string[], previousValues: Record<string, 
       const to = FOCUS_LEVEL_META[newValues.focus_level as 1 | 2 | 3 | 4 | 5]?.label ?? newValues.focus_level;
       return `Focus level changed from ${from} to ${to}`;
     }
-    if (field === 'owner_id') return 'Owner changed';
+    if (field === 'owner_id') return 'Executive Owner changed';
     if (field === 'target_date') return 'Target date changed';
     if (field === 'name') return `Project renamed to ${newValues.name}`;
     if (field === 'founder_attention_required' && newValues.founder_attention_required) return 'Founder attention enabled';
     if (field === 'blocked_reason') return 'Blocker updated';
+    if (field === 'health') {
+      const from = HEALTH_META[previousValues.health as keyof typeof HEALTH_META]?.label ?? previousValues.health;
+      const to = HEALTH_META[newValues.health as keyof typeof HEALTH_META]?.label ?? newValues.health;
+      return `Health changed from ${from} to ${to}`;
+    }
+    if (field === 'priority_level') return `Priority changed to ${newValues.priority_level}`;
+    if (field === 'progress_percent') return `Progress changed from ${previousValues.progress_percent}% to ${newValues.progress_percent}%`;
+    if (field === 'review_cadence') return 'Review cadence changed';
+    if (field === 'attention_mode') return `Attention mode changed to ${newValues.attention_mode}`;
+    if (field === 'business_impact') return 'Business impact updated';
     return `${FIELD_LABELS[field] ?? field} updated`;
   }
   return `${projectName}: ${changedFields.length} fields updated`;
@@ -338,5 +385,75 @@ export const projectService = {
     });
 
     return updated;
+  },
+
+  async addProjectDependency(organizationId: string, actorId: string, rawInput: CreateProjectDependencyInput) {
+    const input = createProjectDependencySchema.parse(rawInput);
+
+    // Both projects must exist and belong to this org — assertProjectInOrg
+    // gives the same "not found or not yours" behavior as every other
+    // mutation; a cross-org depends-on target fails here before it ever
+    // reaches the DB trigger.
+    const project = await assertProjectInOrg(organizationId, input.projectId);
+    const dependsOn = await assertProjectInOrg(organizationId, input.dependsOnProjectId);
+
+    const duplicate = await projectDependenciesRepository.exists(organizationId, input.projectId, input.dependsOnProjectId);
+    if (duplicate) {
+      throw new BusinessRuleError('This dependency already exists.', 'DUPLICATE_DEPENDENCY');
+    }
+
+    const dependency = await projectDependenciesRepository.create({
+      organization_id: organizationId,
+      project_id: input.projectId,
+      depends_on_project_id: input.dependsOnProjectId,
+      dependency_type: input.dependencyType,
+      note: input.note ?? null,
+      created_by: actorId,
+    });
+
+    await activityRepository.record({
+      organization_id: organizationId,
+      actor_id: actorId,
+      event_type: 'project.dependency_added',
+      entity_type: 'project',
+      entity_id: input.projectId,
+      title: `Dependency added: ${project.name} ${input.dependencyType.replace('_', ' ')} ${dependsOn.name}`,
+      metadata: {
+        project_id: input.projectId,
+        action: 'dependency_added',
+        depends_on_project_id: input.dependsOnProjectId,
+        dependency_type: input.dependencyType,
+        performed_by_user_id: actorId,
+      } as Json,
+    });
+
+    return dependency;
+  },
+
+  async removeProjectDependency(organizationId: string, actorId: string, rawInput: RemoveProjectDependencyInput) {
+    const input = removeProjectDependencySchema.parse(rawInput);
+    const project = await assertProjectInOrg(organizationId, input.projectId);
+
+    const removed = await projectDependenciesRepository.remove(organizationId, input.projectId, input.dependencyId);
+    if (!removed) {
+      throw new NotFoundError('Dependency not found.');
+    }
+
+    await activityRepository.record({
+      organization_id: organizationId,
+      actor_id: actorId,
+      event_type: 'project.dependency_removed',
+      entity_type: 'project',
+      entity_id: input.projectId,
+      title: `Dependency removed from ${project.name}`,
+      metadata: {
+        project_id: input.projectId,
+        action: 'dependency_removed',
+        dependency_id: input.dependencyId,
+        performed_by_user_id: actorId,
+      } as Json,
+    });
+
+    return removed;
   },
 };

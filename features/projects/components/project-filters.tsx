@@ -4,10 +4,10 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useTransition } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { FOCUS_LEVEL_META, PROJECT_STATUS_META, PROJECT_SORT_OPTIONS } from '@/features/projects/constants';
+import { FOCUS_LEVEL_META, PROJECT_STATUS_META, PROJECT_SORT_OPTIONS, CATEGORY_META } from '@/features/projects/constants';
 
 interface ProjectFiltersProps {
-  categories: string[];
+  categories?: string[];
 }
 
 /**
@@ -79,21 +79,19 @@ export function ProjectFilters({ categories }: ProjectFiltersProps) {
         ))}
       </select>
 
-      {categories.length > 0 ? (
-        <select
-          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
-          defaultValue={searchParams.get('category') ?? ''}
-          onChange={(e) => updateParam('category', e.target.value)}
-          aria-label="Filter by category"
-        >
-          <option value="">All categories</option>
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
-          ))}
-        </select>
-      ) : null}
+      <select
+        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
+        defaultValue={searchParams.get('category') ?? ''}
+        onChange={(e) => updateParam('category', e.target.value)}
+        aria-label="Filter by category"
+      >
+        <option value="">All categories</option>
+        {Object.entries(CATEGORY_META).map(([value, meta]) => (
+          <option key={value} value={value}>
+            {meta.label}
+          </option>
+        ))}
+      </select>
 
       <select
         className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"

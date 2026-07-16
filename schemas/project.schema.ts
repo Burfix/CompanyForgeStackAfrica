@@ -20,7 +20,15 @@ export const PROJECT_STATUS_VALUES = [
 export const projectStatusSchema = z.enum(PROJECT_STATUS_VALUES);
 export type ProjectStatus = z.infer<typeof projectStatusSchema>;
 
-export const projectHealthSchema = z.enum(['on_track', 'at_risk', 'off_track']);
+/**
+ * App-level health set. The database enum (`project_health`) is a
+ * superset — it still contains the original Slice 2 values (`on_track`)
+ * because 0006 extended it additively, the same pattern as project_status.
+ * `on_track` is a legacy alias for `healthy`; nothing in the app writes it
+ * anymore, but existing rows keep working without a backfill.
+ */
+export const PROJECT_HEALTH_VALUES = ['healthy', 'needs_attention', 'at_risk', 'off_track', 'unknown'] as const;
+export const projectHealthSchema = z.enum(PROJECT_HEALTH_VALUES);
 export type ProjectHealth = z.infer<typeof projectHealthSchema>;
 
 export const FOCUS_LEVEL_VALUES = [1, 2, 3, 4, 5] as const;
@@ -33,6 +41,58 @@ export const focusLevelSchema = z.union([
 ]);
 export type FocusLevel = z.infer<typeof focusLevelSchema>;
 
+export const PROJECT_CATEGORY_VALUES = [
+  'fundraising',
+  'pilot',
+  'customer',
+  'engineering',
+  'product',
+  'marketing',
+  'partnership',
+  'operations',
+  'research',
+  'finance',
+] as const;
+export const projectCategorySchema = z.enum(PROJECT_CATEGORY_VALUES);
+export type ProjectCategory = z.infer<typeof projectCategorySchema>;
+
+export const PRIORITY_LEVEL_VALUES = ['urgent', 'high', 'medium', 'low'] as const;
+export const priorityLevelSchema = z.enum(PRIORITY_LEVEL_VALUES);
+export type PriorityLevel = z.infer<typeof priorityLevelSchema>;
+
+/** Display-only fallback used when a project has no explicit priority_score. */
+export const PRIORITY_LEVEL_SCORE_FALLBACK: Record<PriorityLevel, number> = {
+  urgent: 90,
+  high: 70,
+  medium: 50,
+  low: 30,
+};
+
+export const REVIEW_CADENCE_VALUES = ['weekly', 'biweekly', 'monthly', 'quarterly', 'milestone_based', 'none'] as const;
+export const reviewCadenceSchema = z.enum(REVIEW_CADENCE_VALUES);
+export type ReviewCadence = z.infer<typeof reviewCadenceSchema>;
+
+export const ATTENTION_MODE_VALUES = ['founder', 'delegated', 'team', 'no_attention'] as const;
+export const attentionModeSchema = z.enum(ATTENTION_MODE_VALUES);
+export type AttentionMode = z.infer<typeof attentionModeSchema>;
+
+export const BUSINESS_IMPACT_VALUES = [
+  'revenue',
+  'customer',
+  'fundraising',
+  'product',
+  'strategic',
+  'operational',
+  'reputational',
+  'compliance',
+] as const;
+export const businessImpactSchema = z.enum(BUSINESS_IMPACT_VALUES);
+export type BusinessImpact = z.infer<typeof businessImpactSchema>;
+
+export const DEPENDENCY_TYPE_VALUES = ['blocks', 'depends_on', 'related_to'] as const;
+export const dependencyTypeSchema = z.enum(DEPENDENCY_TYPE_VALUES);
+export type DependencyType = z.infer<typeof dependencyTypeSchema>;
+
 const optionalText = (max: number) => z.string().trim().max(max).optional().or(z.literal('').transform(() => undefined));
 
 /**
@@ -43,7 +103,7 @@ const optionalText = (max: number) => z.string().trim().max(max).optional().or(z
  */
 const projectFieldsSchema = {
   name: z.string().trim().min(2, 'Name must be at least 2 characters').max(120),
-  category: z.string().trim().min(1, 'Category is required').max(60),
+  category: projectCategorySchema,
   description: optionalText(4000),
   ownerId: z.string().uuid().optional(),
   status: projectStatusSchema.default('proposed'),
@@ -55,10 +115,20 @@ const projectFieldsSchema = {
   startDate: z.string().date().optional(),
   targetDate: z.string().date().optional(),
   nextReviewAt: z.string().datetime({ offset: true }).optional().or(z.string().date().optional()),
+  reviewCadence: reviewCadenceSchema.default('none'),
   blockedReason: optionalText(500),
   waitingOn: optionalText(500),
-  founderAttentionRequired: z.boolean().default(false),
+  // attentionMode is the user-facing control; founderAttentionRequired is
+  // derived from it in the service layer (mapInputToPatch never writes it
+  // directly from user input — see project.service.ts) so the two columns
+  // can never drift apart.
+  attentionMode: attentionModeSchema.default('no_attention'),
+  priorityLevel: priorityLevelSchema.default('medium'),
   priorityScore: z.coerce.number().min(0, 'Priority score cannot be negative').max(9999.99, 'Priority score is out of bounds').optional(),
+  health: projectHealthSchema.default('unknown'),
+  healthNote: optionalText(500),
+  businessImpact: z.array(businessImpactSchema).max(BUSINESS_IMPACT_VALUES.length).default([]),
+  progressPercent: z.coerce.number().int('Progress must be a whole number').min(0, 'Progress cannot be below 0').max(100, 'Progress cannot exceed 100').default(0),
 };
 
 function withCrossFieldRules<T extends z.ZodTypeAny>(schema: T) {
@@ -75,6 +145,13 @@ function withCrossFieldRules<T extends z.ZodTypeAny>(schema: T) {
         code: z.ZodIssueCode.custom,
         path: ['blockedReason'],
         message: 'A blocked reason is required when status is Blocked.',
+      });
+    }
+    if ((data.health === 'at_risk' || data.health === 'off_track') && !data.healthNote) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['healthNote'],
+        message: 'A health note is required when health is At Risk or Off Track.',
       });
     }
   });
@@ -161,3 +238,29 @@ export const archiveOrParkProjectSchema = z
 export type ArchiveOrParkProjectInput = z.infer<typeof archiveOrParkProjectSchema>;
 
 export const MAX_CRITICAL_PROJECTS = 3;
+
+/** A project cannot depend on itself; duplicate edges are rejected at the
+ * service/repository layer (unique index on the DB side is the backstop). */
+export const createProjectDependencySchema = z
+  .object({
+    projectId: z.string().uuid(),
+    dependsOnProjectId: z.string().uuid(),
+    dependencyType: dependencyTypeSchema.default('depends_on'),
+    note: optionalText(500),
+  })
+  .superRefine((data, ctx) => {
+    if (data.projectId === data.dependsOnProjectId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dependsOnProjectId'],
+        message: 'A project cannot depend on itself.',
+      });
+    }
+  });
+export type CreateProjectDependencyInput = z.infer<typeof createProjectDependencySchema>;
+
+export const removeProjectDependencySchema = z.object({
+  projectId: z.string().uuid(),
+  dependencyId: z.string().uuid(),
+});
+export type RemoveProjectDependencyInput = z.infer<typeof removeProjectDependencySchema>;

@@ -6,10 +6,23 @@ import { projectsRepository } from '@/repositories/projects.repository';
 import { tasksRepository } from '@/repositories/tasks.repository';
 import { milestonesRepository } from '@/repositories/milestones.repository';
 import { activityRepository } from '@/repositories/activity.repository';
+import { projectDependenciesRepository } from '@/repositories/project-dependencies.repository';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { HealthPill, FocusLevelBadge, StatusPill, AttentionIndicator } from '@/components/shared/status-badge';
+import {
+  HealthPill,
+  FocusLevelBadge,
+  StatusPill,
+  AttentionIndicator,
+  PriorityBadge,
+  AttentionModeBadge,
+  BusinessImpactBadges,
+  ProgressBar,
+} from '@/components/shared/status-badge';
+import { CATEGORY_META, REVIEW_CADENCE_META } from '@/features/projects/constants';
+import type { ProjectCategory } from '@/schemas/project.schema';
 import { ProjectActions } from '@/features/projects/components/project-actions';
+import { ProjectDependencies } from '@/features/projects/components/project-dependencies';
 
 interface ProjectDetailPageProps {
   params: Promise<{ projectId: string }>;
@@ -24,6 +37,15 @@ function TimelineFact({ label, value }: { label: string; value: string | null })
   );
 }
 
+function SummaryFact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div>{children}</div>
+    </div>
+  );
+}
+
 export default async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const { projectId } = await params;
   const org = await getCurrentOrg();
@@ -31,15 +53,32 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   const project = await projectsRepository.getById(org.organizationId, projectId);
   if (!project) notFound();
 
-  const [tasks, milestones, activity] = await Promise.all([
+  const [tasks, milestones, activity, dependencies, selectableProjects] = await Promise.all([
     tasksRepository.listByProject(org.organizationId, projectId),
     milestonesRepository.listByProject(org.organizationId, projectId),
     activityRepository.listForEntity(org.organizationId, 'project', projectId),
+    projectDependenciesRepository.listForProject(org.organizationId, projectId),
+    projectsRepository.listSelectable(org.organizationId, projectId),
   ]);
 
   const owner = Array.isArray(project.owner) ? project.owner[0] : project.owner;
+  const categoryLabel = project.category ? CATEGORY_META[project.category as ProjectCategory]?.label ?? project.category : 'Uncategorized';
 
   const daysRemaining = project.target_date ? differenceInCalendarDays(new Date(project.target_date), new Date()) : null;
+
+  const outgoingDeps = (dependencies.outgoing ?? []).map((d) => ({
+    id: d.id,
+    dependency_type: d.dependency_type,
+    note: d.note,
+    project: Array.isArray(d.depends_on) ? d.depends_on[0] : d.depends_on,
+  })).filter((d): d is typeof d & { project: NonNullable<typeof d.project> } => !!d.project);
+
+  const incomingDeps = (dependencies.incoming ?? []).map((d) => ({
+    id: d.id,
+    dependency_type: d.dependency_type,
+    note: d.note,
+    project: Array.isArray(d.dependent) ? d.dependent[0] : d.dependent,
+  })).filter((d): d is typeof d & { project: NonNullable<typeof d.project> } => !!d.project);
 
   return (
     <div className="flex flex-col gap-6">
@@ -50,7 +89,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
             <AttentionIndicator active={project.founder_attention_required} />
             <div>
               <h1 className="text-xl font-semibold text-foreground">{project.name}</h1>
-              <p className="text-sm text-muted-foreground">{project.category ?? 'Uncategorized'} · Priority {project.priority_score}</p>
+              <p className="text-sm text-muted-foreground">{categoryLabel}</p>
             </div>
           </div>
           <Button asChild variant="outline" size="sm">
@@ -62,19 +101,36 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
           <FocusLevelBadge level={project.focus_level} />
           <StatusPill status={project.status} />
           <HealthPill health={project.health} />
-          <span className="text-xs text-muted-foreground">Owner: {owner?.full_name ?? 'Unassigned'}</span>
+          {project.priority_level ? <PriorityBadge level={project.priority_level} score={project.priority_score} /> : null}
+          {project.attention_mode ? <AttentionModeBadge mode={project.attention_mode} /> : null}
         </div>
 
         <ProjectActions projectId={project.id} currentStatus={project.status} currentFocusLevel={project.focus_level} />
       </div>
 
+      {/* Executive summary — derived entirely from stored structured data */}
+      <Card>
+        <CardHeader><CardTitle className="text-foreground">Executive Summary</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <SummaryFact label="Health"><HealthPill health={project.health} /></SummaryFact>
+          <SummaryFact label="Progress"><ProgressBar percent={project.progress_percent ?? 0} /></SummaryFact>
+          <SummaryFact label="Priority">{project.priority_level ? <PriorityBadge level={project.priority_level} score={project.priority_score} /> : '—'}</SummaryFact>
+          <SummaryFact label="Focus level"><FocusLevelBadge level={project.focus_level} /></SummaryFact>
+          <SummaryFact label="Status"><StatusPill status={project.status} /></SummaryFact>
+          <SummaryFact label="Executive Owner"><span className="text-sm text-foreground">{owner?.full_name ?? 'Unassigned'}</span></SummaryFact>
+          <SummaryFact label="Attention mode">{project.attention_mode ? <AttentionModeBadge mode={project.attention_mode} /> : '—'}</SummaryFact>
+          <SummaryFact label="Next review"><span className="text-sm text-foreground">{project.next_review_at ? project.next_review_at.slice(0, 10) : '—'}</span></SummaryFact>
+          <SummaryFact label="Target date"><span className="text-sm text-foreground">{project.target_date ?? '—'}</span></SummaryFact>
+          <SummaryFact label="Last activity"><span className="text-sm text-foreground">{formatDistanceToNow(new Date(project.last_activity_at), { addSuffix: true })}</span></SummaryFact>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
-          {/* Summary */}
+          {/* Success Definition (was: Outcome) */}
           <Card>
-            <CardHeader><CardTitle className="text-foreground">Summary</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-foreground">Success Definition</CardTitle></CardHeader>
             <CardContent className="flex flex-col gap-3">
-              {project.description ? <p className="text-sm text-foreground">{project.description}</p> : null}
               <div>
                 <p className="text-xs text-muted-foreground">Desired outcome</p>
                 <p className="text-sm text-foreground">{project.desired_outcome ?? '—'}</p>
@@ -90,11 +146,28 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
                   </p>
                 </div>
               ) : null}
+              {project.health_note ? (
+                <div>
+                  <p className="text-xs text-muted-foreground">Health note</p>
+                  <p className="text-sm text-foreground">{project.health_note}</p>
+                </div>
+              ) : null}
+              <BusinessImpactBadges impact={project.business_impact} />
               {project.founder_attention_required ? (
                 <p className="text-xs font-medium text-red-400">Founder attention required</p>
               ) : null}
             </CardContent>
           </Card>
+
+          {/* Executive Notes (was: Description) */}
+          {project.description ? (
+            <Card>
+              <CardHeader><CardTitle className="text-foreground">Executive Notes</CardTitle></CardHeader>
+              <CardContent>
+                <p className="text-sm text-foreground">{project.description}</p>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* Blockers */}
           {(project.blocked_reason || project.waiting_on) && (
@@ -106,6 +179,19 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
               </CardContent>
             </Card>
           )}
+
+          {/* Dependencies */}
+          <Card>
+            <CardHeader><CardTitle className="text-foreground">Dependencies</CardTitle></CardHeader>
+            <CardContent>
+              <ProjectDependencies
+                projectId={project.id}
+                outgoing={outgoingDeps as never}
+                incoming={incomingDeps as never}
+                selectableProjects={selectableProjects}
+              />
+            </CardContent>
+          </Card>
 
           {/* Tasks */}
           <Card>
@@ -140,20 +226,6 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
               )}
             </CardContent>
           </Card>
-
-          {/* Decisions / Recommendations — reserved for a future slice */}
-          <Card>
-            <CardHeader><CardTitle className="text-foreground">Decisions</CardTitle></CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">Decision tracking isn&rsquo;t built yet — reserved for a later slice.</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-foreground">Recommendations</CardTitle></CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">AI recommendations ship once the AI executive team layer is built.</p>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="flex flex-col gap-6">
@@ -163,6 +235,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
             <CardContent className="flex flex-col gap-3">
               <TimelineFact label="Start date" value={project.start_date} />
               <TimelineFact label="Target date" value={project.target_date} />
+              <TimelineFact label="Review cadence" value={project.review_cadence ? REVIEW_CADENCE_META[project.review_cadence]?.label ?? project.review_cadence : null} />
               <TimelineFact label="Next review" value={project.next_review_at ? project.next_review_at.slice(0, 10) : null} />
               <TimelineFact label="Last activity" value={formatDistanceToNow(new Date(project.last_activity_at), { addSuffix: true })} />
               {daysRemaining !== null ? (
@@ -189,6 +262,14 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
                   </div>
                 ))
               )}
+            </CardContent>
+          </Card>
+
+          {/* Decisions / Recommendations — reserved for a future slice */}
+          <Card>
+            <CardHeader><CardTitle className="text-foreground">Decisions</CardTitle></CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">Decision tracking isn&rsquo;t built yet — reserved for a later slice.</p>
             </CardContent>
           </Card>
         </div>

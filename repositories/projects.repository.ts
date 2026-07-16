@@ -13,7 +13,7 @@ export interface ProjectListFilters {
 }
 
 const PROJECT_LIST_COLUMNS =
-  'id, name, category, status, focus_level, health, target_date, start_date, owner_id, priority_score, desired_outcome, founder_attention_required, last_activity_at, slug, owner:profiles!projects_owner_id_fkey(id, full_name)';
+  'id, name, category, status, focus_level, health, health_note, target_date, start_date, next_review_at, review_cadence, owner_id, priority_score, priority_level, progress_percent, attention_mode, business_impact, desired_outcome, founder_attention_required, last_activity_at, slug, owner:profiles!projects_owner_id_fkey(id, full_name)';
 
 export const projectsRepository = {
   /** Full portfolio view with search/filter/sort — powers /projects. */
@@ -167,5 +167,40 @@ export const projectsRepository = {
     const { data, error } = await query.maybeSingle();
     if (error) throw toOperationalError(error, 'Could not check slug uniqueness.');
     return !!data;
+  },
+
+  /** Lightweight rows for populating "depends on" pickers — deliberately
+   * excludes the target project itself and archived projects. */
+  async listSelectable(organizationId: string, excludeProjectId?: string) {
+    const supabase = await createClient();
+    let query = supabase
+      .from('projects')
+      .select('id, name')
+      .eq('organization_id', organizationId)
+      .is('archived_at', null)
+      .order('name', { ascending: true });
+    if (excludeProjectId) {
+      query = query.neq('id', excludeProjectId);
+    }
+    const { data, error } = await query;
+    if (error) throw toOperationalError(error, 'Could not load projects for dependency selection.');
+    return data;
+  },
+
+  /** Founder HQ intelligence: at-risk/off-track and founder-required rows,
+   * ordered so the most urgent (by priority_level, then next_review_at)
+   * surface first. Reuses listProjects rather than a bespoke query. */
+  async listNeedingAttention(organizationId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('projects')
+      .select(PROJECT_LIST_COLUMNS)
+      .eq('organization_id', organizationId)
+      .is('archived_at', null)
+      .or('health.eq.at_risk,health.eq.off_track,attention_mode.eq.founder')
+      .order('next_review_at', { ascending: true, nullsFirst: false });
+
+    if (error) throw toOperationalError(error, 'Could not load projects needing attention.');
+    return data;
   },
 };

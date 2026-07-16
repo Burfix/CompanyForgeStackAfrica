@@ -32,6 +32,7 @@ function revalidateProjectViews(projectId?: string) {
 
 function parseCreateInput(formData: FormData): CreateProjectInput {
   const focusLevelRaw = formData.get('focusLevel');
+  const progressRaw = formData.get('progressPercent');
   return {
     name: String(formData.get('name') ?? ''),
     category: String(formData.get('category') ?? ''),
@@ -46,9 +47,15 @@ function parseCreateInput(formData: FormData): CreateProjectInput {
     startDate: (formData.get('startDate') as string) || undefined,
     targetDate: (formData.get('targetDate') as string) || undefined,
     nextReviewAt: (formData.get('nextReviewAt') as string) || undefined,
+    reviewCadence: (formData.get('reviewCadence') as CreateProjectInput['reviewCadence']) || 'none',
     blockedReason: (formData.get('blockedReason') as string) || undefined,
     waitingOn: (formData.get('waitingOn') as string) || undefined,
-    founderAttentionRequired: formData.get('founderAttentionRequired') === 'on',
+    attentionMode: (formData.get('attentionMode') as CreateProjectInput['attentionMode']) || 'no_attention',
+    priorityLevel: (formData.get('priorityLevel') as CreateProjectInput['priorityLevel']) || 'medium',
+    health: (formData.get('health') as CreateProjectInput['health']) || 'unknown',
+    healthNote: (formData.get('healthNote') as string) || undefined,
+    businessImpact: formData.getAll('businessImpact').map(String) as CreateProjectInput['businessImpact'],
+    progressPercent: (progressRaw ? Number(progressRaw) : 0) as CreateProjectInput['progressPercent'],
   } as CreateProjectInput;
 }
 
@@ -185,5 +192,55 @@ export async function archiveOrParkProjectAction(
 
   revalidateProjectViews(action === 'park' ? projectId : undefined);
   revalidatePath('/projects');
+  return { success: true };
+}
+
+export async function addProjectDependencyAction(
+  projectId: string,
+  dependsOnProjectId: string,
+  dependencyType: string,
+  note?: string,
+): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  try {
+    await projectService.addProjectDependency(org.organizationId, user.id, {
+      projectId,
+      dependsOnProjectId,
+      dependencyType: dependencyType as never,
+      note,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { fieldErrors: zodFieldErrors(error) };
+    }
+    if (error instanceof NotFoundError) {
+      return { formError: 'Project not found.' };
+    }
+    if (error instanceof BusinessRuleError) {
+      return { formError: error.message };
+    }
+    return { formError: 'Could not add the dependency. Please try again.' };
+  }
+
+  revalidateProjectViews(projectId);
+  return { success: true };
+}
+
+export async function removeProjectDependencyAction(projectId: string, dependencyId: string): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  try {
+    await projectService.removeProjectDependency(org.organizationId, user.id, { projectId, dependencyId });
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return { formError: 'Dependency not found.' };
+    }
+    return { formError: 'Could not remove the dependency. Please try again.' };
+  }
+
+  revalidateProjectViews(projectId);
   return { success: true };
 }

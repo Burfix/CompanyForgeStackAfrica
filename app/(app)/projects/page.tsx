@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { getCurrentOrg } from '@/lib/auth/session';
 import { projectsRepository } from '@/repositories/projects.repository';
 import { milestonesRepository } from '@/repositories/milestones.repository';
+import { projectDependenciesRepository } from '@/repositories/project-dependencies.repository';
 import { Button } from '@/components/ui/button';
 import { ProjectFilters } from '@/features/projects/components/project-filters';
 import { ProjectCard } from '@/features/projects/components/project-card';
@@ -17,21 +18,18 @@ export default async function ProjectsPage({ searchParams }: ProjectsPageProps) 
   const org = await getCurrentOrg();
   const params = await searchParams;
 
-  const [projects, categories] = await Promise.all([
-    projectsRepository.listProjects(org.organizationId, {
-      search: params.q,
-      focusLevel: params.focus ? Number(params.focus) : undefined,
-      status: params.status as Enums<'project_status'> | undefined,
-      category: params.category,
-      sort: (params.sort as ProjectSortOption) ?? 'priority_score',
-    }),
-    projectsRepository.listCategories(org.organizationId),
-  ]);
+  const projects = await projectsRepository.listProjects(org.organizationId, {
+    search: params.q,
+    focusLevel: params.focus ? Number(params.focus) : undefined,
+    status: params.status as Enums<'project_status'> | undefined,
+    category: params.category,
+    sort: (params.sort as ProjectSortOption) ?? 'priority_score',
+  });
 
-  const nextMilestones = await milestonesRepository.listNextForProjects(
-    org.organizationId,
-    projects.map((p) => p.id),
-  );
+  const [nextMilestones, dependencyCounts] = await Promise.all([
+    milestonesRepository.listNextForProjects(org.organizationId, projects.map((p) => p.id)),
+    projectDependenciesRepository.countForProjects(org.organizationId, projects.map((p) => p.id)),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,7 +44,7 @@ export default async function ProjectsPage({ searchParams }: ProjectsPageProps) 
       </div>
 
       <Suspense fallback={null}>
-        <ProjectFilters categories={categories} />
+        <ProjectFilters />
       </Suspense>
 
       {projects.length === 0 ? (
@@ -58,7 +56,12 @@ export default async function ProjectsPage({ searchParams }: ProjectsPageProps) 
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
-            <ProjectCard key={project.id} project={project as never} nextMilestone={nextMilestones.get(project.id)} />
+            <ProjectCard
+              key={project.id}
+              project={project as never}
+              nextMilestone={nextMilestones.get(project.id)}
+              dependencyCount={dependencyCounts.get(project.id)}
+            />
           ))}
         </div>
       )}

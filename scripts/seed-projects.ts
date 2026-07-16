@@ -14,6 +14,13 @@
  * everything else (owner, dates, metrics) is left null for you to fill in
  * through the app once real values exist.
  *
+ * Project Intelligence fields added in migration 0006 (priority_level,
+ * review_cadence, attention_mode, health, business_impact, progress_percent)
+ * are likewise NOT set here — they take their column defaults (medium /
+ * none / no_attention / unknown / {} / 0) and are meant to be set
+ * deliberately through the app once you've actually assessed each project,
+ * not guessed at seed time.
+ *
  * Usage:
  *   SUPABASE_SERVICE_ROLE_KEY=... npx tsx scripts/seed-projects.ts
  *

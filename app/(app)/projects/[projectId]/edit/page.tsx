@@ -41,9 +41,15 @@ export default async function EditProjectPage({ params }: EditProjectPageProps) 
     startDate: project.start_date,
     targetDate: project.target_date,
     nextReviewAt: project.next_review_at ? project.next_review_at.slice(0, 10) : null,
+    reviewCadence: project.review_cadence,
     blockedReason: project.blocked_reason,
     waitingOn: project.waiting_on,
-    founderAttentionRequired: project.founder_attention_required,
+    attentionMode: project.attention_mode,
+    priorityLevel: project.priority_level,
+    health: project.health,
+    healthNote: project.health_note,
+    businessImpact: project.business_impact ?? [],
+    progressPercent: project.progress_percent,
   };
 
   const boundAction = updateProject.bind(null, projectId);
