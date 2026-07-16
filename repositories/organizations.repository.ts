@@ -1,0 +1,32 @@
+import { createClient } from '@/lib/supabase/server';
+import { toOperationalError } from '@/lib/errors';
+
+/**
+ * All Supabase calls for the `organizations` / `organization_members`
+ * tables live here. Services and Server Actions call this module — they
+ * never call `supabase.from(...)` directly.
+ */
+export const organizationsRepository = {
+  async getById(organizationId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('organizations')
+      .select('id, name, slug, created_at')
+      .eq('id', organizationId)
+      .single();
+
+    if (error) throw toOperationalError(error, 'Could not load organization.');
+    return data;
+  },
+
+  async listMembers(organizationId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('organization_members')
+      .select('id, role, user_id, profiles(id, full_name, avatar_url)')
+      .eq('organization_id', organizationId);
+
+    if (error) throw toOperationalError(error, 'Could not load team members.');
+    return data;
+  },
+};
