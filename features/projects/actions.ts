@@ -13,6 +13,32 @@ export interface ProjectActionState {
   fieldErrors?: Record<string, string[]>;
   requiresOverride?: boolean;
   success?: boolean;
+  /**
+   * Raw echo of whatever was submitted, keyed by form field name. Populated
+   * only on a failed create/update submission so ProjectForm can re-seed
+   * every field with what the user actually typed instead of resetting to
+   * blank — a validation error must never cost someone their work. See
+   * extractSubmittedValues below.
+   */
+  submittedValues?: Record<string, string | string[]>;
+}
+
+/** Generic FormData -> plain object echo. Deliberately not tied to the
+ * CreateProjectInput shape (which has already coerced/dropped invalid
+ * values by the time a ZodError is thrown) — this reads the raw strings
+ * the browser actually sent, so it survives even values that failed
+ * validation entirely. */
+function extractSubmittedValues(formData: FormData): Record<string, string | string[]> {
+  const values: Record<string, string | string[]> = {};
+  for (const key of formData.keys()) {
+    if (key === 'businessImpact') {
+      values[key] = formData.getAll(key).map(String);
+      continue;
+    }
+    const value = formData.get(key);
+    if (typeof value === 'string') values[key] = value;
+  }
+  return values;
 }
 
 function zodFieldErrors(error: z.ZodError): Record<string, string[]> {
@@ -67,13 +93,14 @@ export async function createProject(_prevState: ProjectActionState, formData: Fo
   try {
     project = await projectService.createProject(org.organizationId, user.id, parseCreateInput(formData));
   } catch (error) {
+    const submittedValues = extractSubmittedValues(formData);
     if (error instanceof z.ZodError) {
-      return { fieldErrors: zodFieldErrors(error) };
+      return { fieldErrors: zodFieldErrors(error), submittedValues };
     }
     if (error instanceof BusinessRuleError) {
-      return { formError: error.message };
+      return { formError: error.message, submittedValues };
     }
-    return { formError: 'Could not create the project. Please try again.' };
+    return { formError: 'Could not create the project. Please try again.', submittedValues };
   }
 
   revalidateProjectViews(project.id);
@@ -89,16 +116,17 @@ export async function updateProject(projectId: string, _prevState: ProjectAction
   try {
     await projectService.updateProject(org.organizationId, user.id, projectId, input);
   } catch (error) {
+    const submittedValues = extractSubmittedValues(formData);
     if (error instanceof z.ZodError) {
-      return { fieldErrors: zodFieldErrors(error) };
+      return { fieldErrors: zodFieldErrors(error), submittedValues };
     }
     if (error instanceof NotFoundError) {
-      return { formError: 'Project not found.' };
+      return { formError: 'Project not found.', submittedValues };
     }
     if (error instanceof BusinessRuleError) {
-      return { formError: error.message };
+      return { formError: error.message, submittedValues };
     }
-    return { formError: 'Could not update the project. Please try again.' };
+    return { formError: 'Could not update the project. Please try again.', submittedValues };
   }
 
   revalidateProjectViews(projectId);

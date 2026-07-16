@@ -377,7 +377,7 @@ export type Database = {
           category: string | null
           created_at: string
           created_by: string | null
-          current_value: number | null
+          current_value: string | null
           description: string | null
           desired_outcome: string | null
           due_date: string | null
@@ -401,7 +401,7 @@ export type Database = {
           success_metric: string | null
           target_date: string | null
           target_outcome: string | null
-          target_value: number | null
+          target_value: string | null
           updated_at: string
           waiting_on: string | null
         }
@@ -413,7 +413,7 @@ export type Database = {
           category?: string | null
           created_at?: string
           created_by?: string | null
-          current_value?: number | null
+          current_value?: string | null
           description?: string | null
           desired_outcome?: string | null
           due_date?: string | null
@@ -437,7 +437,7 @@ export type Database = {
           success_metric?: string | null
           target_date?: string | null
           target_outcome?: string | null
-          target_value?: number | null
+          target_value?: string | null
           updated_at?: string
           waiting_on?: string | null
         }
@@ -449,7 +449,7 @@ export type Database = {
           category?: string | null
           created_at?: string
           created_by?: string | null
-          current_value?: number | null
+          current_value?: string | null
           description?: string | null
           desired_outcome?: string | null
           due_date?: string | null
@@ -473,7 +473,7 @@ export type Database = {
           success_metric?: string | null
           target_date?: string | null
           target_outcome?: string | null
-          target_value?: number | null
+          target_value?: string | null
           updated_at?: string
           waiting_on?: string | null
         }

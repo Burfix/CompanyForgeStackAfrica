@@ -12,6 +12,22 @@ export interface TaskActionState {
   formError?: string;
   fieldErrors?: Record<string, string[]>;
   success?: boolean;
+  /**
+   * Raw echo of whatever was submitted, keyed by form field name. Populated
+   * only on a failed create/update submission so TaskForm can re-seed every
+   * field with what the user actually typed instead of resetting to blank.
+   * Mirrors the identical fix in features/projects/actions.ts.
+   */
+  submittedValues?: Record<string, string | string[]>;
+}
+
+function extractSubmittedValues(formData: FormData): Record<string, string | string[]> {
+  const values: Record<string, string | string[]> = {};
+  for (const key of formData.keys()) {
+    const value = formData.get(key);
+    if (typeof value === 'string') values[key] = value;
+  }
+  return values;
 }
 
 function zodFieldErrors(error: z.ZodError): Record<string, string[]> {
@@ -60,9 +76,10 @@ export async function createTaskAction(_prevState: TaskActionState, formData: Fo
   try {
     task = await taskService.createTask(org.organizationId, user.id, parseCreateInput(formData));
   } catch (error) {
-    if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error) };
-    if (error instanceof BusinessRuleError) return { formError: error.message };
-    return { formError: 'Could not create the task. Please try again.' };
+    const submittedValues = extractSubmittedValues(formData);
+    if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error), submittedValues };
+    if (error instanceof BusinessRuleError) return { formError: error.message, submittedValues };
+    return { formError: 'Could not create the task. Please try again.', submittedValues };
   }
 
   revalidateTaskViews(task.id, task.project_id);
@@ -79,10 +96,11 @@ export async function updateTaskAction(taskId: string, _prevState: TaskActionSta
   try {
     updated = await taskService.updateTask(org.organizationId, user.id, taskId, input);
   } catch (error) {
-    if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error) };
-    if (error instanceof NotFoundError) return { formError: 'Task not found.' };
-    if (error instanceof BusinessRuleError) return { formError: error.message };
-    return { formError: 'Could not update the task. Please try again.' };
+    const submittedValues = extractSubmittedValues(formData);
+    if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error), submittedValues };
+    if (error instanceof NotFoundError) return { formError: 'Task not found.', submittedValues };
+    if (error instanceof BusinessRuleError) return { formError: error.message, submittedValues };
+    return { formError: 'Could not update the task. Please try again.', submittedValues };
   }
 
   revalidateTaskViews(taskId, updated.project_id);

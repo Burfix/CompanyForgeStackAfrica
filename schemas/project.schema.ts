@@ -110,8 +110,13 @@ const projectFieldsSchema = {
   focusLevel: focusLevelSchema.default(3),
   desiredOutcome: z.string().trim().min(2, 'Desired outcome is required').max(1000),
   successMetric: optionalText(300),
-  targetValue: z.coerce.number().finite().optional(),
-  currentValue: z.coerce.number().finite().optional(),
+  // Deliberately free text, not a number — "2 paying locations" and
+  // "Signed pilot agreement" are valid values, not just numeric progress.
+  // (current_value/target_value were migrated from numeric(14,2) to text
+  // in 0008 specifically so this schema change wasn't a lie about the
+  // underlying column — see that migration's comment for the data check.)
+  targetValue: optionalText(200),
+  currentValue: optionalText(200),
   startDate: z.string().date().optional(),
   targetDate: z.string().date().optional(),
   nextReviewAt: z.string().datetime({ offset: true }).optional().or(z.string().date().optional()),

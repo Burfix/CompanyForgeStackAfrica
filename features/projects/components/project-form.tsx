@@ -26,8 +26,8 @@ export interface ProjectFormValues {
   focusLevel?: number;
   desiredOutcome?: string | null;
   successMetric?: string | null;
-  targetValue?: number | null;
-  currentValue?: number | null;
+  targetValue?: string | null;
+  currentValue?: string | null;
   startDate?: string | null;
   targetDate?: string | null;
   nextReviewAt?: string | null;
@@ -62,13 +62,54 @@ function HelperText({ children }: { children: React.ReactNode }) {
 
 export function ProjectForm({ action, initialValues, members, submitLabel }: ProjectFormProps) {
   const [state, formAction, isPending] = useActionState(action, initialState);
-  const [status, setStatus] = useState(initialValues?.status ?? 'proposed');
-  const [focusLevel, setFocusLevel] = useState(initialValues?.focusLevel ?? 3);
-  const [health, setHealth] = useState(initialValues?.health ?? 'unknown');
-  const [businessImpact, setBusinessImpact] = useState<string[]>(initialValues?.businessImpact ?? []);
+
+  // If the last submission failed, prefer what the user actually typed
+  // (echoed back by the server action as submittedValues) over
+  // initialValues, so a validation error never wipes out someone's work.
+  // See the ProjectActionState.submittedValues doc comment in actions.ts.
+  const submitted = state.submittedValues;
+  const values: ProjectFormValues = submitted
+    ? {
+        ...initialValues,
+        name: (submitted.name as string) ?? initialValues?.name,
+        category: (submitted.category as string) ?? initialValues?.category,
+        description: (submitted.description as string) || initialValues?.description,
+        ownerId: (submitted.ownerId as string) || initialValues?.ownerId,
+        status: (submitted.status as string) ?? initialValues?.status,
+        focusLevel: submitted.focusLevel ? Number(submitted.focusLevel) : initialValues?.focusLevel,
+        desiredOutcome: (submitted.desiredOutcome as string) ?? initialValues?.desiredOutcome,
+        successMetric: (submitted.successMetric as string) || initialValues?.successMetric,
+        targetValue: (submitted.targetValue as string) || initialValues?.targetValue,
+        currentValue: (submitted.currentValue as string) || initialValues?.currentValue,
+        startDate: (submitted.startDate as string) || initialValues?.startDate,
+        targetDate: (submitted.targetDate as string) || initialValues?.targetDate,
+        nextReviewAt: (submitted.nextReviewAt as string) || initialValues?.nextReviewAt,
+        reviewCadence: (submitted.reviewCadence as string) ?? initialValues?.reviewCadence,
+        blockedReason: (submitted.blockedReason as string) || initialValues?.blockedReason,
+        waitingOn: (submitted.waitingOn as string) || initialValues?.waitingOn,
+        attentionMode: (submitted.attentionMode as string) ?? initialValues?.attentionMode,
+        priorityLevel: (submitted.priorityLevel as string) ?? initialValues?.priorityLevel,
+        health: (submitted.health as string) ?? initialValues?.health,
+        healthNote: (submitted.healthNote as string) || initialValues?.healthNote,
+        businessImpact: (submitted.businessImpact as string[]) ?? initialValues?.businessImpact ?? [],
+        progressPercent: submitted.progressPercent ? Number(submitted.progressPercent) : initialValues?.progressPercent,
+      }
+    : initialValues ?? {};
+
+  const [status, setStatus] = useState(values?.status ?? 'proposed');
+  const [focusLevel, setFocusLevel] = useState(values?.focusLevel ?? 3);
+  const [health, setHealth] = useState(values?.health ?? 'unknown');
+  const [businessImpact, setBusinessImpact] = useState<string[]>(values?.businessImpact ?? []);
 
   const fieldErrors = state.fieldErrors ?? {};
   const healthNoteRequired = health === 'at_risk' || health === 'off_track';
+  // Uncontrolled inputs only read defaultValue at mount, so a failed
+  // submission that changes `values` (via submittedValues above) wouldn't
+  // otherwise be reflected in the DOM. Keying the form on the latest action
+  // result forces exactly one remount per submission, which re-applies the
+  // fresh defaultValue props without disturbing the controlled fields above
+  // (they already hold what the user set, independent of this remount).
+  const formInstanceKey = JSON.stringify({ e: state.fieldErrors ?? null, f: state.formError ?? null, v: state.submittedValues ?? null });
 
   function toggleImpact(value: string) {
     setBusinessImpact((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
@@ -77,7 +118,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
   const fieldErrorEntries = Object.entries(fieldErrors);
 
   return (
-    <form action={formAction} className="flex flex-col gap-6">
+    <form key={formInstanceKey} action={formAction} className="flex flex-col gap-6">
       {state.formError ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {state.formError}
@@ -103,7 +144,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="name">Name *</Label>
-            <Input id="name" name="name" defaultValue={initialValues?.name} required maxLength={120} />
+            <Input id="name" name="name" defaultValue={values?.name} required maxLength={120} />
             <FieldError errors={fieldErrors.name} />
           </div>
 
@@ -113,7 +154,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
               <select
                 id="category"
                 name="category"
-                defaultValue={initialValues?.category ?? ''}
+                defaultValue={values?.category ?? ''}
                 required
                 className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
               >
@@ -167,21 +208,21 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
           {status === 'blocked' ? (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="blockedReason">Blocked reason *</Label>
-              <Input id="blockedReason" name="blockedReason" defaultValue={initialValues?.blockedReason ?? ''} required />
+              <Input id="blockedReason" name="blockedReason" defaultValue={values?.blockedReason ?? ''} required />
               <FieldError errors={fieldErrors.blockedReason} />
             </div>
           ) : (
-            <input type="hidden" name="blockedReason" value={initialValues?.blockedReason ?? ''} />
+            <input type="hidden" name="blockedReason" value={values?.blockedReason ?? ''} />
           )}
 
           {focusLevel === 4 ? (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="waitingOn">Waiting on <span className="font-normal text-muted-foreground">(recommended for Waiting projects)</span></Label>
-              <Input id="waitingOn" name="waitingOn" defaultValue={initialValues?.waitingOn ?? ''} />
+              <Input id="waitingOn" name="waitingOn" defaultValue={values?.waitingOn ?? ''} />
               <FieldError errors={fieldErrors.waitingOn} />
             </div>
           ) : (
-            <input type="hidden" name="waitingOn" value={initialValues?.waitingOn ?? ''} />
+            <input type="hidden" name="waitingOn" value={values?.waitingOn ?? ''} />
           )}
         </CardContent>
       </Card>
@@ -198,7 +239,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
             <textarea
               id="desiredOutcome"
               name="desiredOutcome"
-              defaultValue={initialValues?.desiredOutcome ?? ''}
+              defaultValue={values?.desiredOutcome ?? ''}
               required
               rows={2}
               className="rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground"
@@ -213,7 +254,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
               id="successMetric"
               name="successMetric"
               placeholder="e.g. 2 paying locations, Signed pilot agreement"
-              defaultValue={initialValues?.successMetric ?? ''}
+              defaultValue={values?.successMetric ?? ''}
             />
           </div>
 
@@ -221,12 +262,12 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="currentValue">Current value</Label>
               <HelperText>Where are we today?</HelperText>
-              <Input id="currentValue" name="currentValue" type="text" defaultValue={initialValues?.currentValue ?? ''} />
+              <Input id="currentValue" name="currentValue" type="text" defaultValue={values?.currentValue ?? ''} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="targetValue">Target value</Label>
               <HelperText>What result are we trying to reach?</HelperText>
-              <Input id="targetValue" name="targetValue" type="text" defaultValue={initialValues?.targetValue ?? ''} />
+              <Input id="targetValue" name="targetValue" type="text" defaultValue={values?.targetValue ?? ''} />
             </div>
           </div>
         </CardContent>
@@ -244,7 +285,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
               <select
                 id="priorityLevel"
                 name="priorityLevel"
-                defaultValue={initialValues?.priorityLevel ?? 'medium'}
+                defaultValue={values?.priorityLevel ?? 'medium'}
                 className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
               >
                 {Object.entries(PRIORITY_LEVEL_META).map(([value, meta]) => (
@@ -279,7 +320,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
               Health note {healthNoteRequired ? '*' : <span className="font-normal text-muted-foreground">(recommended when Needs Attention)</span>}
             </Label>
             <HelperText>A concise reason for the selected health, e.g. &ldquo;Waiting for integration credentials.&rdquo;</HelperText>
-            <Input id="healthNote" name="healthNote" defaultValue={initialValues?.healthNote ?? ''} required={healthNoteRequired} />
+            <Input id="healthNote" name="healthNote" defaultValue={values?.healthNote ?? ''} required={healthNoteRequired} />
             <FieldError errors={fieldErrors.healthNote} />
           </div>
 
@@ -293,7 +334,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
               min={0}
               max={100}
               step={1}
-              defaultValue={initialValues?.progressPercent ?? 0}
+              defaultValue={values?.progressPercent ?? 0}
             />
             <FieldError errors={fieldErrors.progressPercent} />
           </div>
@@ -334,16 +375,16 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
           <div className="grid grid-cols-3 gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="startDate">Start date</Label>
-              <Input id="startDate" name="startDate" type="date" defaultValue={initialValues?.startDate ?? ''} />
+              <Input id="startDate" name="startDate" type="date" defaultValue={values?.startDate ?? ''} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="targetDate">Target date</Label>
-              <Input id="targetDate" name="targetDate" type="date" defaultValue={initialValues?.targetDate ?? ''} />
+              <Input id="targetDate" name="targetDate" type="date" defaultValue={values?.targetDate ?? ''} />
               <FieldError errors={fieldErrors.targetDate} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="nextReviewAt">Next review date</Label>
-              <Input id="nextReviewAt" name="nextReviewAt" type="date" defaultValue={initialValues?.nextReviewAt ?? ''} />
+              <Input id="nextReviewAt" name="nextReviewAt" type="date" defaultValue={values?.nextReviewAt ?? ''} />
             </div>
           </div>
 
@@ -352,7 +393,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
             <select
               id="reviewCadence"
               name="reviewCadence"
-              defaultValue={initialValues?.reviewCadence ?? 'none'}
+              defaultValue={values?.reviewCadence ?? 'none'}
               className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
             >
               {Object.entries(REVIEW_CADENCE_META).map(([value, meta]) => (
@@ -377,7 +418,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
             <select
               id="ownerId"
               name="ownerId"
-              defaultValue={initialValues?.ownerId ?? ''}
+              defaultValue={values?.ownerId ?? ''}
               className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
             >
               <option value="">Unassigned</option>
@@ -396,7 +437,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
             <select
               id="attentionMode"
               name="attentionMode"
-              defaultValue={initialValues?.attentionMode ?? 'no_attention'}
+              defaultValue={values?.attentionMode ?? 'no_attention'}
               className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
             >
               {Object.entries(ATTENTION_MODE_META).map(([value, meta]) => (
@@ -420,7 +461,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
           <textarea
             id="description"
             name="description"
-            defaultValue={initialValues?.description ?? ''}
+            defaultValue={values?.description ?? ''}
             rows={3}
             className="rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
           />
