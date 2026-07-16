@@ -83,7 +83,7 @@ export default async function FounderHQPage() {
 
         {/* Today's priorities */}
         <Card>
-          <CardHeader><CardTitle>Today's Priorities</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Today&rsquo;s Priorities</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-2">
             {priorities.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nothing due today. Clear runway.</p>

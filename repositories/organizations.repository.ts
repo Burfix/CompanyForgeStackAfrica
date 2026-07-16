@@ -29,4 +29,24 @@ export const organizationsRepository = {
     if (error) throw toOperationalError(error, 'Could not load team members.');
     return data;
   },
+
+  /**
+   * Confirms a given user is actually a member of this org before letting
+   * them be assigned as a project owner. Without this check, a client
+   * could submit any UUID as `ownerId` and it would silently pass FK
+   * validation as long as *some* profile row existed for it — this closes
+   * that gap explicitly rather than relying on the foreign key alone.
+   */
+  async verifyOrganisationMember(organizationId: string, userId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('organization_members')
+      .select('user_id')
+      .eq('organization_id', organizationId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw toOperationalError(error, 'Could not verify organization membership.');
+    return !!data;
+  },
 };

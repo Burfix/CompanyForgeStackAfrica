@@ -17,6 +17,22 @@ export const activityRepository = {
     return data;
   },
 
+  /** Activity for a single entity (e.g. one project), chronological. Powers the project detail page's activity timeline. */
+  async listForEntity(organizationId: string, entityType: string, entityId: string, limit = 30) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('activity_events')
+      .select('id, event_type, entity_type, entity_id, title, description, metadata, occurred_at, actor_id, profiles(full_name)')
+      .eq('organization_id', organizationId)
+      .eq('entity_type', entityType)
+      .eq('entity_id', entityId)
+      .order('occurred_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw toOperationalError(error, 'Could not load project activity.');
+    return data;
+  },
+
   /**
    * Writes an activity event. This should only ever be called from the
    * service layer as a side effect of a mutation — never directly from a

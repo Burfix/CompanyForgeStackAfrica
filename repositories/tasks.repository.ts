@@ -19,4 +19,18 @@ export const tasksRepository = {
     if (error) throw toOperationalError(error, 'Could not load tasks.');
     return data;
   },
+
+  /** Tasks for a single project — the "Related records" section of the project detail page. */
+  async listByProject(organizationId: string, projectId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('id, title, status, priority, due_date, assignee_id')
+      .eq('organization_id', organizationId)
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw toOperationalError(error, 'Could not load project tasks.');
+    return data;
+  },
 };

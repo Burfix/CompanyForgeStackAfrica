@@ -1,5 +1,5 @@
 // AUTO-GENERATED — do not hand-edit.
-// Regenerate with: npm run gen:types
+// Regenerate with the Supabase MCP `generate_typescript_types` tool.
 // Source of truth: Supabase project "ForgeStack Founder OS" (zqsinfrgiuulxkyydeun)
 
 export type Json =
@@ -307,57 +307,93 @@ export type Database = {
       projects: {
         Row: {
           archived_at: string | null
+          blocked_reason: string | null
           category: string | null
           created_at: string
           created_by: string | null
+          current_value: number | null
           description: string | null
+          desired_outcome: string | null
           due_date: string | null
           focus_level: number
+          founder_attention_required: boolean
           health: Database["public"]["Enums"]["project_health"]
           id: string
+          last_activity_at: string
           name: string
+          next_review_at: string | null
           organization_id: string
           owner_id: string | null
           priority_score: number
+          slug: string | null
+          start_date: string | null
           status: Database["public"]["Enums"]["project_status"]
+          success_metric: string | null
+          target_date: string | null
           target_outcome: string | null
+          target_value: number | null
           updated_at: string
+          waiting_on: string | null
         }
         Insert: {
           archived_at?: string | null
+          blocked_reason?: string | null
           category?: string | null
           created_at?: string
           created_by?: string | null
+          current_value?: number | null
           description?: string | null
+          desired_outcome?: string | null
           due_date?: string | null
           focus_level?: number
+          founder_attention_required?: boolean
           health?: Database["public"]["Enums"]["project_health"]
           id?: string
+          last_activity_at?: string
           name: string
+          next_review_at?: string | null
           organization_id: string
           owner_id?: string | null
           priority_score?: number
+          slug?: string | null
+          start_date?: string | null
           status?: Database["public"]["Enums"]["project_status"]
+          success_metric?: string | null
+          target_date?: string | null
           target_outcome?: string | null
+          target_value?: number | null
           updated_at?: string
+          waiting_on?: string | null
         }
         Update: {
           archived_at?: string | null
+          blocked_reason?: string | null
           category?: string | null
           created_at?: string
           created_by?: string | null
+          current_value?: number | null
           description?: string | null
+          desired_outcome?: string | null
           due_date?: string | null
           focus_level?: number
+          founder_attention_required?: boolean
           health?: Database["public"]["Enums"]["project_health"]
           id?: string
+          last_activity_at?: string
           name?: string
+          next_review_at?: string | null
           organization_id?: string
           owner_id?: string | null
           priority_score?: number
+          slug?: string | null
+          start_date?: string | null
           status?: Database["public"]["Enums"]["project_status"]
+          success_metric?: string | null
+          target_date?: string | null
           target_outcome?: string | null
+          target_value?: number | null
           updated_at?: string
+          waiting_on?: string | null
         }
         Relationships: [
           {
@@ -477,6 +513,10 @@ export type Database = {
         | "on_hold"
         | "completed"
         | "cancelled"
+        | "proposed"
+        | "at_risk"
+        | "blocked"
+        | "parked"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "todo" | "in_progress" | "blocked" | "done" | "cancelled"
     }
@@ -615,6 +655,10 @@ export const Constants = {
         "on_hold",
         "completed",
         "cancelled",
+        "proposed",
+        "at_risk",
+        "blocked",
+        "parked",
       ],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["todo", "in_progress", "blocked", "done", "cancelled"],

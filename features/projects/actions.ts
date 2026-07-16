@@ -1,0 +1,189 @@
+'use server';
+
+import { z } from 'zod';
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { requireUser, getCurrentOrg } from '@/lib/auth/session';
+import { projectService } from '@/services/project.service';
+import { BusinessRuleError, NotFoundError } from '@/lib/errors';
+import type { CreateProjectInput, UpdateProjectInput } from '@/schemas/project.schema';
+
+export interface ProjectActionState {
+  formError?: string;
+  fieldErrors?: Record<string, string[]>;
+  requiresOverride?: boolean;
+  success?: boolean;
+}
+
+function zodFieldErrors(error: z.ZodError): Record<string, string[]> {
+  const fieldErrors: Record<string, string[]> = {};
+  for (const issue of error.issues) {
+    const key = issue.path.join('.') || '_form';
+    fieldErrors[key] = [...(fieldErrors[key] ?? []), issue.message];
+  }
+  return fieldErrors;
+}
+
+function revalidateProjectViews(projectId?: string) {
+  revalidatePath('/');
+  revalidatePath('/projects');
+  if (projectId) revalidatePath(`/projects/${projectId}`);
+}
+
+function parseCreateInput(formData: FormData): CreateProjectInput {
+  const focusLevelRaw = formData.get('focusLevel');
+  return {
+    name: String(formData.get('name') ?? ''),
+    category: String(formData.get('category') ?? ''),
+    description: (formData.get('description') as string) || undefined,
+    ownerId: (formData.get('ownerId') as string) || undefined,
+    status: (formData.get('status') as CreateProjectInput['status']) || 'proposed',
+    focusLevel: (focusLevelRaw ? Number(focusLevelRaw) : 3) as CreateProjectInput['focusLevel'],
+    desiredOutcome: String(formData.get('desiredOutcome') ?? ''),
+    successMetric: (formData.get('successMetric') as string) || undefined,
+    targetValue: (formData.get('targetValue') as string) || undefined,
+    currentValue: (formData.get('currentValue') as string) || undefined,
+    startDate: (formData.get('startDate') as string) || undefined,
+    targetDate: (formData.get('targetDate') as string) || undefined,
+    nextReviewAt: (formData.get('nextReviewAt') as string) || undefined,
+    blockedReason: (formData.get('blockedReason') as string) || undefined,
+    waitingOn: (formData.get('waitingOn') as string) || undefined,
+    founderAttentionRequired: formData.get('founderAttentionRequired') === 'on',
+  } as CreateProjectInput;
+}
+
+export async function createProject(_prevState: ProjectActionState, formData: FormData): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  let project;
+  try {
+    project = await projectService.createProject(org.organizationId, user.id, parseCreateInput(formData));
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { fieldErrors: zodFieldErrors(error) };
+    }
+    if (error instanceof BusinessRuleError) {
+      return { formError: error.message };
+    }
+    return { formError: 'Could not create the project. Please try again.' };
+  }
+
+  revalidateProjectViews(project.id);
+  redirect(`/projects/${project.id}`);
+}
+
+export async function updateProject(projectId: string, _prevState: ProjectActionState, formData: FormData): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  const input = parseCreateInput(formData) as UpdateProjectInput;
+
+  try {
+    await projectService.updateProject(org.organizationId, user.id, projectId, input);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { fieldErrors: zodFieldErrors(error) };
+    }
+    if (error instanceof NotFoundError) {
+      return { formError: 'Project not found.' };
+    }
+    if (error instanceof BusinessRuleError) {
+      return { formError: error.message };
+    }
+    return { formError: 'Could not update the project. Please try again.' };
+  }
+
+  revalidateProjectViews(projectId);
+  redirect(`/projects/${projectId}`);
+}
+
+export async function updateProjectStatusAction(
+  projectId: string,
+  status: string,
+  options?: { blockedReason?: string; reason?: string },
+): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  try {
+    await projectService.updateProjectStatus(org.organizationId, user.id, {
+      projectId,
+      status: status as never,
+      blockedReason: options?.blockedReason,
+      reason: options?.reason,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { fieldErrors: zodFieldErrors(error) };
+    }
+    if (error instanceof NotFoundError) {
+      return { formError: 'Project not found.' };
+    }
+    return { formError: 'Could not update status. Please try again.' };
+  }
+
+  revalidateProjectViews(projectId);
+  return { success: true };
+}
+
+export async function updateProjectFocusLevelAction(
+  projectId: string,
+  focusLevel: number,
+  options?: { reason?: string; overrideCriticalLimit?: boolean; overrideReason?: string },
+): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  try {
+    await projectService.updateProjectFocusLevel(org.organizationId, user.id, {
+      projectId,
+      focusLevel: focusLevel as never,
+      reason: options?.reason,
+      overrideCriticalLimit: options?.overrideCriticalLimit ?? false,
+      overrideReason: options?.overrideReason,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { fieldErrors: zodFieldErrors(error) };
+    }
+    if (error instanceof NotFoundError) {
+      return { formError: 'Project not found.' };
+    }
+    if (error instanceof BusinessRuleError && error.code === 'CRITICAL_LIMIT_EXCEEDED') {
+      return { formError: error.message, requiresOverride: true };
+    }
+    if (error instanceof BusinessRuleError) {
+      return { formError: error.message };
+    }
+    return { formError: 'Could not update focus level. Please try again.' };
+  }
+
+  revalidateProjectViews(projectId);
+  return { success: true };
+}
+
+export async function archiveOrParkProjectAction(
+  projectId: string,
+  action: 'archive' | 'park',
+  reason?: string,
+): Promise<ProjectActionState> {
+  const user = await requireUser();
+  const org = await getCurrentOrg();
+
+  try {
+    await projectService.archiveOrParkProject(org.organizationId, user.id, { projectId, action, reason });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { fieldErrors: zodFieldErrors(error) };
+    }
+    if (error instanceof NotFoundError) {
+      return { formError: 'Project not found.' };
+    }
+    return { formError: `Could not ${action} the project. Please try again.` };
+  }
+
+  revalidateProjectViews(action === 'park' ? projectId : undefined);
+  revalidatePath('/projects');
+  return { success: true };
+}
