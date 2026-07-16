@@ -503,49 +503,88 @@ export type Database = {
       }
       tasks: {
         Row: {
+          actual_minutes: number | null
           assignee_id: string | null
+          attention_mode: Database["public"]["Enums"]["project_attention_mode"]
+          blocked_reason: string | null
           completed_at: string | null
           created_at: string
           created_by: string | null
+          due_at: string | null
           due_date: string | null
+          estimated_minutes: number | null
+          founder_required: boolean
           id: string
+          last_activity_at: string
+          milestone_id: string | null
+          next_action: string | null
           notes: string | null
           organization_id: string
           priority: Database["public"]["Enums"]["task_priority"]
           project_id: string
+          source_reference: string | null
+          source_type: string
+          start_at: string | null
           status: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at: string
+          waiting_on: string | null
         }
         Insert: {
+          actual_minutes?: number | null
           assignee_id?: string | null
+          attention_mode?: Database["public"]["Enums"]["project_attention_mode"]
+          blocked_reason?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
+          due_at?: string | null
           due_date?: string | null
+          estimated_minutes?: number | null
+          founder_required?: boolean
           id?: string
+          last_activity_at?: string
+          milestone_id?: string | null
+          next_action?: string | null
           notes?: string | null
           organization_id: string
           priority?: Database["public"]["Enums"]["task_priority"]
           project_id: string
+          source_reference?: string | null
+          source_type?: string
+          start_at?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at?: string
+          waiting_on?: string | null
         }
         Update: {
+          actual_minutes?: number | null
           assignee_id?: string | null
+          attention_mode?: Database["public"]["Enums"]["project_attention_mode"]
+          blocked_reason?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
+          due_at?: string | null
           due_date?: string | null
+          estimated_minutes?: number | null
+          founder_required?: boolean
           id?: string
+          last_activity_at?: string
+          milestone_id?: string | null
+          next_action?: string | null
           notes?: string | null
           organization_id?: string
           priority?: Database["public"]["Enums"]["task_priority"]
           project_id?: string
+          source_reference?: string | null
+          source_type?: string
+          start_at?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
           updated_at?: string
+          waiting_on?: string | null
         }
         Relationships: [
           {
@@ -560,6 +599,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_milestone_id_fkey"
+            columns: ["milestone_id"]
+            isOneToOne: false
+            referencedRelation: "milestones"
             referencedColumns: ["id"]
           },
           {
@@ -616,7 +662,17 @@ export type Database = {
         | "blocked"
         | "parked"
       task_priority: "low" | "medium" | "high" | "urgent"
-      task_status: "todo" | "in_progress" | "blocked" | "done" | "cancelled"
+      task_status:
+        | "todo"
+        | "in_progress"
+        | "blocked"
+        | "done"
+        | "cancelled"
+        | "inbox"
+        | "planned"
+        | "waiting"
+        | "review"
+        | "completed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -777,7 +833,18 @@ export const Constants = {
         "parked",
       ],
       task_priority: ["low", "medium", "high", "urgent"],
-      task_status: ["todo", "in_progress", "blocked", "done", "cancelled"],
+      task_status: [
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "cancelled",
+        "inbox",
+        "planned",
+        "waiting",
+        "review",
+        "completed",
+      ],
     },
   },
 } as const

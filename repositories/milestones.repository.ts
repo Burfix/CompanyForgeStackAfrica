@@ -63,4 +63,46 @@ export const milestonesRepository = {
     }
     return nextByProject;
   },
+
+  /** Milestones for a set of projects, grouped by project — powers the
+   * task form's project → milestone dependent select without an N+1 query
+   * per project. */
+  async listForProjects(organizationId: string, projectIds: string[]) {
+    if (projectIds.length === 0) return new Map<string, { id: string; title: string }[]>();
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('milestones')
+      .select('id, title, project_id')
+      .eq('organization_id', organizationId)
+      .in('project_id', projectIds)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw toOperationalError(error, 'Could not load milestones.');
+
+    const byProject = new Map<string, { id: string; title: string }[]>();
+    for (const m of data) {
+      const list = byProject.get(m.project_id) ?? [];
+      list.push({ id: m.id, title: m.title });
+      byProject.set(m.project_id, list);
+    }
+    return byProject;
+  },
+
+  /** Used by task creation/update to enforce "milestone must belong to the
+   * selected project" — never trust a client-supplied milestone_id without
+   * this check. */
+  async verifyMilestoneBelongsToProject(organizationId: string, milestoneId: string, projectId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('milestones')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('id', milestoneId)
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    if (error) throw toOperationalError(error, 'Could not verify milestone.');
+    return !!data;
+  },
 };

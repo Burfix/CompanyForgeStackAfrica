@@ -3,6 +3,7 @@ import { organizationsRepository } from '@/repositories/organizations.repository
 import { activityRepository } from '@/repositories/activity.repository';
 import { projectDependenciesRepository } from '@/repositories/project-dependencies.repository';
 import { NotFoundError, BusinessRuleError } from '@/lib/errors';
+import { diffPatch as sharedDiffPatch } from '@/lib/diff-patch';
 import { FOCUS_LEVEL_META, PROJECT_STATUS_META, HEALTH_META, attentionModeRequiresFounder } from '@/features/projects/constants';
 import {
   createProjectSchema,
@@ -127,37 +128,16 @@ const FIELD_LABELS: Record<string, string> = {
 
 /** Computes only the fields that actually changed — this is what makes
  * no-op submissions a no-op (empty diff) instead of a hollow activity
- * entry, and what lets activity metadata carry real before/after values. */
-/** Arrays (business_impact) need value comparison, not reference equality —
- * otherwise a resubmitted-but-unchanged array would always look "changed"
- * and defeat no-op detection. */
-function valuesEqual(a: unknown, b: unknown): boolean {
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    const sortedA = [...a].sort();
-    const sortedB = [...b].sort();
-    return sortedA.every((v, i) => v === sortedB[i]);
-  }
-  return a === b;
-}
-
+ * entry, and what lets activity metadata carry real before/after values.
+ * Shared with services/task.service.ts via lib/diff-patch.ts rather than
+ * reimplemented per entity. */
 function diffPatch(existing: ProjectRow, patch: TablesUpdate<'projects'>) {
-  const changedFields: string[] = [];
-  const previousValues: Record<string, unknown> = {};
-  const newValues: Record<string, unknown> = {};
-  const finalPatch: TablesUpdate<'projects'> = {};
-
-  for (const [key, newValue] of Object.entries(patch)) {
-    const existingValue = (existing as Record<string, unknown>)[key];
-    if (!valuesEqual(existingValue, newValue)) {
-      changedFields.push(key);
-      previousValues[key] = existingValue;
-      newValues[key] = newValue;
-      (finalPatch as Record<string, unknown>)[key] = newValue;
-    }
-  }
-
-  return { changedFields, previousValues, newValues, finalPatch };
+  return sharedDiffPatch(existing as Record<string, unknown>, patch as Record<string, unknown>) as {
+    changedFields: string[];
+    previousValues: Record<string, unknown>;
+    newValues: Record<string, unknown>;
+    finalPatch: TablesUpdate<'projects'>;
+  };
 }
 
 function describeChange(changedFields: string[], previousValues: Record<string, unknown>, newValues: Record<string, unknown>, projectName: string): string {

@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { ProjectStatus, PriorityLevel, AttentionMode, BusinessImpact } from '@/schemas/project.schema';
+import type { TaskStatus } from '@/schemas/task.schema';
 import {
   FOCUS_LEVEL_META,
   PROJECT_STATUS_META,
@@ -9,6 +10,7 @@ import {
   BUSINESS_IMPACT_META,
   normalizeHealth,
 } from '@/features/projects/constants';
+import { TASK_STATUS_META, DUE_STATE_META, computeDueState, type DueState } from '@/features/tasks/constants';
 
 const TONE_STYLES: Record<string, string> = {
   neutral: 'bg-secondary text-secondary-foreground border-border',
@@ -67,6 +69,32 @@ export function PriorityBadge({ level, score }: { level: PriorityLevel | string;
     <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', TONE_STYLES[meta?.tone ?? 'neutral'])}>
       {meta?.label ?? level}
       {score !== undefined && score !== null ? <span className="ml-1 text-[10px] opacity-70">P{score}</span> : null}
+    </span>
+  );
+}
+
+export function TaskStatusPill({ status }: { status: TaskStatus | string }) {
+  const meta = TASK_STATUS_META[status as TaskStatus];
+  const tone = meta?.tone ?? 'neutral';
+  return (
+    <span
+      title={meta?.description}
+      className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', TONE_STYLES[tone])}
+    >
+      {meta?.label ?? status}
+    </span>
+  );
+}
+
+/** Deterministic due-state badge — text label always shown, never color
+ * alone. Accepts raw due_at/status so callers don't have to precompute. */
+export function DueStateBadge({ dueAt, status }: { dueAt: string | null; status: TaskStatus | string }) {
+  const state: DueState = computeDueState(dueAt, status as TaskStatus);
+  const meta = DUE_STATE_META[state];
+  if (state === 'no_due_date') return null;
+  return (
+    <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', TONE_STYLES[meta.tone])}>
+      {meta.label}
     </span>
   );
 }

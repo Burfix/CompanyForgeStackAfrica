@@ -4,11 +4,42 @@ import { milestonesRepository } from '@/repositories/milestones.repository';
 import { activityRepository } from '@/repositories/activity.repository';
 import { tasksRepository } from '@/repositories/tasks.repository';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { HealthPill, FocusLevelBadge, PriorityBadge, ProgressBar, AttentionModeBadge } from '@/components/shared/status-badge';
+import {
+  HealthPill,
+  FocusLevelBadge,
+  PriorityBadge,
+  ProgressBar,
+  AttentionModeBadge,
+  TaskStatusPill,
+  DueStateBadge,
+} from '@/components/shared/status-badge';
 import { PRIORITY_LEVEL_SCORE_FALLBACK, FOCUS_LEVEL_META } from '@/features/projects/constants';
+import { computeDueState, taskSortWeight } from '@/features/tasks/constants';
 import type { PriorityLevel } from '@/schemas/project.schema';
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
+
+interface FounderHqTask {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  due_at: string | null;
+  founder_required: boolean;
+  next_action: string | null;
+  project: { id: string; name: string } | { id: string; name: string }[] | null;
+}
+
+function todaysPriorityReason(task: FounderHqTask, now: Date): string {
+  const state = computeDueState(task.due_at, task.status as never, now);
+  if (state === 'overdue' && task.priority === 'urgent') return 'Overdue · Urgent';
+  if (state === 'overdue') return 'Overdue';
+  if (task.founder_required && state === 'due_today') return 'Founder required · Due today';
+  if (task.status === 'blocked') return 'Blocked · high impact';
+  if (state === 'due_today') return 'Due today';
+  if (task.status === 'in_progress') return 'In progress · approaching deadline';
+  return 'Needs attention';
+}
 
 /**
  * Founder HQ — the homepage. Server-rendered: every widget below reads
@@ -19,17 +50,44 @@ import Link from 'next/link';
  * a widget needs live updates.
  */
 export default async function FounderHQPage() {
-  const user = await requireUser();
+  await requireUser();
   const org = await getCurrentOrg();
 
-  const [projects, statusCounts, milestones, activity, priorities, needsAttention] = await Promise.all([
+  const [projects, statusCounts, milestones, activity, taskCounts, allOpenTasks, tasksNeedingAttention, needsAttention] = await Promise.all([
     projectsRepository.listByOrg(org.organizationId),
     projectsRepository.countByStatus(org.organizationId),
     milestonesRepository.listUpcoming(org.organizationId),
     activityRepository.listRecent(org.organizationId, 8),
-    tasksRepository.listTodaysPriorities(org.organizationId, user.id),
+    tasksRepository.countTasksByStatus(org.organizationId),
+    tasksRepository.listTasks(org.organizationId, {}),
+    tasksRepository.listTasksNeedingAttention(org.organizationId),
     projectsRepository.listNeedingAttention(org.organizationId),
   ]);
+
+  const now = new Date();
+  const openTasks = (allOpenTasks as unknown as FounderHqTask[]).filter((t) => !['completed', 'done', 'cancelled'].includes(t.status));
+  const dueTodayCount = openTasks.filter((t) => computeDueState(t.due_at, t.status as never, now) === 'due_today').length;
+  const overdueCount = openTasks.filter((t) => computeDueState(t.due_at, t.status as never, now) === 'overdue').length;
+  const founderRequiredTaskCount = openTasks.filter((t) => t.founder_required).length;
+  const blockedTaskCount = taskCounts.blocked ?? 0;
+  const inReviewCount = taskCounts.review ?? 0;
+
+  // Today's Priorities: deterministic top 5, no AI ordering — combines the
+  // exact buckets the spec calls for, deduped, sorted by taskSortWeight.
+  const priorityCandidates = openTasks.filter((t) => {
+    const state = computeDueState(t.due_at, t.status as never, now);
+    return (
+      state === 'overdue' ||
+      state === 'due_today' ||
+      t.founder_required ||
+      t.priority === 'urgent' ||
+      (t.status === 'blocked' && (t.priority === 'urgent' || t.priority === 'high')) ||
+      (t.status === 'in_progress' && state === 'due_soon')
+    );
+  });
+  const todaysPriorities = [...priorityCandidates]
+    .sort((a, b) => taskSortWeight(a as never, now) - taskSortWeight(b as never, now))
+    .slice(0, 5);
 
   const criticalProjects = projects.filter((p) => p.focus_level <= 2);
   const atRiskOrOffTrack = projects.filter((p) => p.health === 'at_risk' || p.health === 'off_track').length;
@@ -146,23 +204,80 @@ export default async function FounderHQPage() {
           </CardContent>
         </Card>
 
-        {/* Today's priorities */}
+        {/* Today's priorities — deterministic, not AI-ranked */}
         <Card>
           <CardHeader><CardTitle>Today&rsquo;s Priorities</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-2">
-            {priorities.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing due today. Clear runway.</p>
+            {todaysPriorities.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing urgent right now. Clear runway.</p>
             ) : (
-              priorities.map((task) => (
-                <div key={task.id} className="rounded-md border border-border px-3 py-2">
-                  <p className="text-sm text-foreground">{task.title}</p>
-                  <p className="text-xs text-muted-foreground">{task.projects?.name}</p>
-                </div>
-              ))
+              todaysPriorities.map((task) => {
+                const taskProject = Array.isArray(task.project) ? task.project[0] : task.project;
+                return (
+                  <Link key={task.id} href={`/tasks/${task.id}`} className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 hover:border-primary/50">
+                    <p className="text-sm text-foreground">{task.title}</p>
+                    <p className="text-xs text-muted-foreground">{taskProject?.name ?? 'No project'} · {todaysPriorityReason(task, now)}</p>
+                    <div className="flex items-center gap-1.5">
+                      <PriorityBadge level={task.priority} />
+                      <DueStateBadge dueAt={task.due_at} status={task.status} />
+                    </div>
+                    {task.next_action ? <p className="text-xs text-muted-foreground">Next: {task.next_action}</p> : null}
+                  </Link>
+                );
+              })
             )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Task summary */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        <Card>
+          <CardHeader><CardTitle>Due Today</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{dueTodayCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Overdue</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{overdueCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Founder Required</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{founderRequiredTaskCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Blocked</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{blockedTaskCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>In Review</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{inReviewCount}</CardContent>
+        </Card>
+      </div>
+
+      {/* Tasks needing attention — kept as its own panel alongside (not
+          replacing) the project-level Needs Attention panel above. */}
+      {tasksNeedingAttention.length > 0 ? (
+        <Card>
+          <CardHeader><CardTitle>Tasks Needing Attention</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {tasksNeedingAttention.slice(0, 8).map((task) => {
+              const taskProject = Array.isArray(task.project) ? task.project[0] : task.project;
+              return (
+                <Link key={task.id} href={`/tasks/${task.id}`} className="flex items-center justify-between rounded-md border border-border px-3 py-2 hover:border-primary/50">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{task.title}</p>
+                    <p className="text-xs text-muted-foreground">{taskProject?.name ?? 'No project'}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <TaskStatusPill status={task.status} />
+                    <DueStateBadge dueAt={task.due_at} status={task.status} />
+                  </div>
+                </Link>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Upcoming milestones */}

@@ -18,11 +18,15 @@ import {
   AttentionModeBadge,
   BusinessImpactBadges,
   ProgressBar,
+  TaskStatusPill,
+  DueStateBadge,
 } from '@/components/shared/status-badge';
 import { CATEGORY_META, REVIEW_CADENCE_META } from '@/features/projects/constants';
 import type { ProjectCategory } from '@/schemas/project.schema';
 import { ProjectActions } from '@/features/projects/components/project-actions';
 import { ProjectDependencies } from '@/features/projects/components/project-dependencies';
+
+const OPEN_TASK_STATUSES = new Set(['inbox', 'planned', 'in_progress', 'review']);
 
 interface ProjectDetailPageProps {
   params: Promise<{ projectId: string }>;
@@ -53,13 +57,18 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   const project = await projectsRepository.getById(org.organizationId, projectId);
   if (!project) notFound();
 
-  const [tasks, milestones, activity, dependencies, selectableProjects] = await Promise.all([
-    tasksRepository.listByProject(org.organizationId, projectId),
+  const [tasks, taskCounts, milestones, activity, dependencies, selectableProjects] = await Promise.all([
+    tasksRepository.listTasksByProject(org.organizationId, projectId),
+    tasksRepository.countTasksByProject(org.organizationId, projectId),
     milestonesRepository.listByProject(org.organizationId, projectId),
     activityRepository.listForEntity(org.organizationId, 'project', projectId),
     projectDependenciesRepository.listForProject(org.organizationId, projectId),
     projectsRepository.listSelectable(org.organizationId, projectId),
   ]);
+
+  const openTasks = tasks.filter((t) => OPEN_TASK_STATUSES.has(t.status));
+  const blockedOrWaitingTasks = tasks.filter((t) => t.status === 'blocked' || t.status === 'waiting');
+  const completedTasks = tasks.filter((t) => t.status === 'completed' || t.status === 'done');
 
   const owner = Array.isArray(project.owner) ? project.owner[0] : project.owner;
   const categoryLabel = project.category ? CATEGORY_META[project.category as ProjectCategory]?.label ?? project.category : 'Uncategorized';
@@ -195,17 +204,60 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
 
           {/* Tasks */}
           <Card>
-            <CardHeader><CardTitle className="text-foreground">Tasks</CardTitle></CardHeader>
-            <CardContent className="flex flex-col gap-2">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-foreground">Tasks</CardTitle>
+              <div className="flex items-center gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/tasks/new?projectId=${project.id}&returnTo=/projects/${project.id}`}>New Task</Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/tasks?project=${project.id}`}>View All</Link>
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <TimelineFact label="Open" value={String(taskCounts.open)} />
+                <TimelineFact label="Overdue" value={String(taskCounts.overdue)} />
+                <TimelineFact label="Completed" value={String(taskCounts.completed)} />
+                <TimelineFact label="Founder-required" value={String(taskCounts.founderRequired)} />
+                <TimelineFact label="Blocked" value={String(taskCounts.blocked)} />
+              </div>
+
               {tasks.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No tasks linked to this project yet.</p>
+                <div className="flex flex-col items-start gap-2">
+                  <p className="text-sm text-muted-foreground">No tasks have been added to this project.</p>
+                  <Button asChild size="sm">
+                    <Link href={`/tasks/new?projectId=${project.id}&returnTo=/projects/${project.id}`}>New Task</Link>
+                  </Button>
+                </div>
               ) : (
-                tasks.map((task) => (
-                  <div key={task.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                    <span className="text-foreground">{task.title}</span>
-                    <span className="text-xs text-muted-foreground">{task.status}</span>
-                  </div>
-                ))
+                <div className="flex flex-col gap-4">
+                  {[
+                    { title: 'Open', items: openTasks },
+                    { title: 'Blocked or Waiting', items: blockedOrWaitingTasks },
+                    { title: 'Completed', items: completedTasks },
+                  ]
+                    .filter((group) => group.items.length > 0)
+                    .map((group) => (
+                      <div key={group.title} className="flex flex-col gap-2">
+                        <p className="text-xs font-medium text-muted-foreground">{group.title}</p>
+                        {group.items.slice(0, 5).map((task) => (
+                          <Link
+                            key={task.id}
+                            href={`/tasks/${task.id}`}
+                            className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:border-primary/50"
+                          >
+                            <span className="text-foreground">{task.title}</span>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <TaskStatusPill status={task.status} />
+                              <DueStateBadge dueAt={task.due_at} status={task.status} />
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    ))}
+                </div>
               )}
             </CardContent>
           </Card>
