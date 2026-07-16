@@ -60,6 +60,7 @@ export function TaskForm({ action, initialValues, members, projects, submitLabel
 
   const fieldErrors = state.fieldErrors ?? {};
   const milestones = useMemo(() => projects.find((p) => p.id === projectId)?.milestones ?? [], [projects, projectId]);
+  const fieldErrorEntries = Object.entries(fieldErrors);
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
@@ -67,6 +68,17 @@ export function TaskForm({ action, initialValues, members, projects, submitLabel
       {state.formError ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {state.formError}
+        </div>
+      ) : null}
+
+      {fieldErrorEntries.length > 0 ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p className="font-medium">This task wasn&rsquo;t saved — {fieldErrorEntries.length === 1 ? 'a field needs' : `${fieldErrorEntries.length} fields need`} attention:</p>
+          <ul className="mt-1 list-disc pl-5">
+            {fieldErrorEntries.map(([field, messages]) => (
+              <li key={field}>{messages[0]}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

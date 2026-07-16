@@ -74,11 +74,24 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
     setBusinessImpact((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   }
 
+  const fieldErrorEntries = Object.entries(fieldErrors);
+
   return (
     <form action={formAction} className="flex flex-col gap-6">
       {state.formError ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {state.formError}
+        </div>
+      ) : null}
+
+      {fieldErrorEntries.length > 0 ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p className="font-medium">This project wasn&rsquo;t saved — {fieldErrorEntries.length === 1 ? 'a field needs' : `${fieldErrorEntries.length} fields need`} attention:</p>
+          <ul className="mt-1 list-disc pl-5">
+            {fieldErrorEntries.map(([field, messages]) => (
+              <li key={field}>{messages[0]}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
