@@ -93,6 +93,14 @@ export const DEPENDENCY_TYPE_VALUES = ['blocks', 'depends_on', 'related_to'] as 
 export const dependencyTypeSchema = z.enum(DEPENDENCY_TYPE_VALUES);
 export type DependencyType = z.infer<typeof dependencyTypeSchema>;
 
+/** Slice 4: whether a project's progress_percent is hand-entered or rolled
+ * up from its non-cancelled milestones. Every existing project defaults to
+ * 'manual' (see migration 0009) — behaviour is unchanged until an operator
+ * explicitly opts a project into milestone-derived progress. */
+export const PROJECT_PROGRESS_MODE_VALUES = ['manual', 'milestones'] as const;
+export const projectProgressModeSchema = z.enum(PROJECT_PROGRESS_MODE_VALUES);
+export type ProjectProgressMode = z.infer<typeof projectProgressModeSchema>;
+
 const optionalText = (max: number) => z.string().trim().max(max).optional().or(z.literal('').transform(() => undefined));
 
 /**
@@ -134,6 +142,12 @@ const projectFieldsSchema = {
   healthNote: optionalText(500),
   businessImpact: z.array(businessImpactSchema).max(BUSINESS_IMPACT_VALUES.length).default([]),
   progressPercent: z.coerce.number().int('Progress must be a whole number').min(0, 'Progress cannot be below 0').max(100, 'Progress cannot exceed 100').default(0),
+  // When 'milestones', progress_percent is recalculated by the service
+  // layer from non-cancelled milestones (see milestone.service.ts /
+  // calculateProjectMilestoneProgress) and a client-supplied progressPercent
+  // is ignored rather than trusted — mirrors the automatic/manual rule on
+  // milestones themselves.
+  progressMode: projectProgressModeSchema.default('manual'),
 };
 
 function withCrossFieldRules<T extends z.ZodTypeAny>(schema: T) {

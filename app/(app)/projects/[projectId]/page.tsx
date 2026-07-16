@@ -25,6 +25,7 @@ import { CATEGORY_META, REVIEW_CADENCE_META } from '@/features/projects/constant
 import type { ProjectCategory } from '@/schemas/project.schema';
 import { ProjectActions } from '@/features/projects/components/project-actions';
 import { ProjectDependencies } from '@/features/projects/components/project-dependencies';
+import { ProjectMilestonesSection } from '@/features/milestones/components/project-milestones-section';
 
 const OPEN_TASK_STATUSES = new Set(['inbox', 'planned', 'in_progress', 'review']);
 
@@ -57,10 +58,11 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   const project = await projectsRepository.getById(org.organizationId, projectId);
   if (!project) notFound();
 
-  const [tasks, taskCounts, milestones, activity, dependencies, selectableProjects] = await Promise.all([
+  const [tasks, taskCounts, milestones, milestoneCounts, activity, dependencies, selectableProjects] = await Promise.all([
     tasksRepository.listTasksByProject(org.organizationId, projectId),
     tasksRepository.countTasksByProject(org.organizationId, projectId),
     milestonesRepository.listByProject(org.organizationId, projectId),
+    milestonesRepository.countMilestonesByProject(org.organizationId, projectId),
     activityRepository.listForEntity(org.organizationId, 'project', projectId),
     projectDependenciesRepository.listForProject(org.organizationId, projectId),
     projectsRepository.listSelectable(org.organizationId, projectId),
@@ -74,6 +76,11 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   const categoryLabel = project.category ? CATEGORY_META[project.category as ProjectCategory]?.label ?? project.category : 'Uncategorized';
 
   const daysRemaining = project.target_date ? differenceInCalendarDays(new Date(project.target_date), new Date()) : null;
+
+  const openMilestoneStatuses = new Set(['pending', 'in_progress', 'blocked', 'waiting']);
+  const nextMilestone = milestones
+    .filter((m) => openMilestoneStatuses.has(m.status) && m.due_date)
+    .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())[0];
 
   const outgoingDeps = (dependencies.outgoing ?? []).map((d) => ({
     id: d.id,
@@ -264,18 +271,25 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
 
           {/* Milestones */}
           <Card>
-            <CardHeader><CardTitle className="text-foreground">Milestones</CardTitle></CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              {milestones.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No milestones yet.</p>
-              ) : (
-                milestones.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                    <span className="text-foreground">{m.title}</span>
-                    <span className="text-xs text-muted-foreground">{m.due_date ?? m.status}</span>
-                  </div>
-                ))
-              )}
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-foreground">Milestones</CardTitle>
+              <div className="flex items-center gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/milestones/new?projectId=${project.id}&returnTo=/projects/${project.id}`}>New Milestone</Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/milestones?project=${project.id}`}>View All</Link>
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <TimelineFact label="Total" value={String(milestoneCounts.total)} />
+                <TimelineFact label="Completed" value={String(milestoneCounts.completed)} />
+                <TimelineFact label="Overdue" value={String(milestoneCounts.overdue)} />
+                <TimelineFact label="Next milestone" value={nextMilestone?.title ?? 'None scheduled'} />
+              </div>
+              <ProjectMilestonesSection projectId={project.id} milestones={milestones as never} />
             </CardContent>
           </Card>
         </div>

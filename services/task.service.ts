@@ -2,6 +2,7 @@ import { tasksRepository } from '@/repositories/tasks.repository';
 import { projectsRepository } from '@/repositories/projects.repository';
 import { milestonesRepository } from '@/repositories/milestones.repository';
 import { activityRepository } from '@/repositories/activity.repository';
+import { milestoneService } from '@/services/milestone.service';
 import { NotFoundError, BusinessRuleError } from '@/lib/errors';
 import { diffPatch } from '@/lib/diff-patch';
 import { TASK_STATUS_META, TASK_PRIORITY_META, ATTENTION_MODE_META, attentionModeRequiresFounder } from '@/features/tasks/constants';
@@ -85,12 +86,33 @@ async function assertOwnerInOrg(organizationId: string, ownerId: string | null |
   }
 }
 
+/**
+ * Verifies a milestone_id both belongs to the selected project (so a task
+ * can never be linked to a milestone from another project — or, since
+ * milestones are org-scoped by the same query, another organization
+ * either) and isn't cancelled. Completed milestones are deliberately
+ * allowed through here — the spec's "warn before assigning a task to a
+ * completed milestone" is a soft, UI-level confirmation (see the task
+ * form), not a hard server-side rejection like the cancelled-milestone
+ * case.
+ */
 async function assertMilestoneBelongsToProject(organizationId: string, milestoneId: string | null | undefined, projectId: string) {
   if (!milestoneId) return;
-  const belongs = await milestonesRepository.verifyMilestoneBelongsToProject(organizationId, milestoneId, projectId);
-  if (!belongs) {
+  const result = await milestonesRepository.verifyMilestoneBelongsToProject(organizationId, milestoneId, projectId);
+  if (!result.belongs) {
     throw new BusinessRuleError('The selected milestone does not belong to the selected project.', 'MILESTONE_NOT_IN_PROJECT');
   }
+  if (result.status === 'cancelled') {
+    throw new BusinessRuleError('This milestone has been cancelled and cannot accept new tasks.', 'MILESTONE_CANCELLED');
+  }
+}
+
+/** Fire-and-await milestone progress recalculation, but only when a task
+ * actually has a milestone attached — a task with no milestone_id should
+ * never trigger any milestone or project roll-up work. */
+async function recalcMilestoneIfPresent(organizationId: string, actorId: string, milestoneId: string | null | undefined) {
+  if (!milestoneId) return;
+  await milestoneService.recalculateMilestoneProgress(organizationId, actorId, milestoneId, 'task_rollup');
 }
 
 /** camelCase input keys -> snake_case DB columns. `founder_required` is
@@ -217,6 +239,8 @@ export const taskService = {
       metadata: { project_id: task.project_id, action: 'created' },
     });
 
+    await recalcMilestoneIfPresent(organizationId, actorId, task.milestone_id);
+
     return task;
   },
 
@@ -258,6 +282,17 @@ export const taskService = {
       },
     });
 
+    // Moving a task between milestones affects both roll-ups; a status
+    // change on a task that stayed on the same milestone only affects that
+    // one. A task with no milestone at all (before or after) never
+    // triggers any of this — recalcMilestoneIfPresent no-ops on null.
+    if (changedFields.includes('milestone_id')) {
+      await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+      await recalcMilestoneIfPresent(organizationId, actorId, updated.milestone_id);
+    } else if (changedFields.includes('status')) {
+      await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+    }
+
     return updated;
   },
 
@@ -296,6 +331,8 @@ export const taskService = {
         reason: input.reason ?? null,
       },
     });
+
+    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
     return updated;
   },
@@ -362,8 +399,9 @@ export const taskService = {
   /**
    * The only path that ever sets completed_at. Preserves the previous
    * status in activity metadata (so "what was it before completion" is
-   * always recoverable) and deliberately does NOT touch project progress
-   * or milestone status — those remain manual in this slice.
+   * always recoverable). As of Slice 4, a task belonging to an
+   * automatic-mode milestone triggers that milestone's (and in turn its
+   * project's, if milestone-derived) progress recalculation.
    */
   async completeTask(organizationId: string, actorId: string, rawInput: CompleteTaskInput) {
     const input = completeTaskSchema.parse(rawInput);
@@ -394,6 +432,8 @@ export const taskService = {
         completed_at: completedAt,
       },
     });
+
+    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
     return updated;
   },
@@ -432,6 +472,8 @@ export const taskService = {
       },
     });
 
+    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+
     return updated;
   },
 
@@ -457,6 +499,11 @@ export const taskService = {
         reason: input.reason ?? null,
       },
     });
+
+    // A cancelled task drops out of the milestone's eligible-task set
+    // entirely — recalculate so it stops counting in either the numerator
+    // or denominator.
+    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
     return updated;
   },

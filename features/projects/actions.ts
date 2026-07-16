@@ -82,6 +82,7 @@ function parseCreateInput(formData: FormData): CreateProjectInput {
     healthNote: (formData.get('healthNote') as string) || undefined,
     businessImpact: formData.getAll('businessImpact').map(String) as CreateProjectInput['businessImpact'],
     progressPercent: (progressRaw ? Number(progressRaw) : 0) as CreateProjectInput['progressPercent'],
+    progressMode: (formData.get('progressMode') as CreateProjectInput['progressMode']) || 'manual',
   } as CreateProjectInput;
 }
 

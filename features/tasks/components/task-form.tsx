@@ -32,7 +32,7 @@ interface TaskFormProps {
   action: (state: TaskActionState, formData: FormData) => Promise<TaskActionState>;
   initialValues?: TaskFormValues;
   members: { id: string; full_name: string | null }[];
-  projects: { id: string; name: string; milestones: { id: string; title: string }[] }[];
+  projects: { id: string; name: string; milestones: { id: string; title: string; status: string }[] }[];
   submitLabel: string;
   lockProject?: boolean;
   returnTo?: string;
@@ -85,10 +85,27 @@ export function TaskForm({ action, initialValues, members, projects, submitLabel
 
   const [projectId, setProjectId] = useState(values?.projectId ?? projects[0]?.id ?? '');
   const [status, setStatus] = useState(values?.status ?? 'inbox');
+  const [milestoneId, setMilestoneId] = useState(values?.milestoneId ?? '');
 
   const fieldErrors = state.fieldErrors ?? {};
+  // Milestones are scoped to whichever project is currently selected —
+  // switching projects clears the list to that project's own milestones,
+  // satisfying "show milestones only after a project is selected, and only
+  // that project's milestones."
   const milestones = useMemo(() => projects.find((p) => p.id === projectId)?.milestones ?? [], [projects, projectId]);
   const fieldErrorEntries = Object.entries(fieldErrors);
+
+  function handleMilestoneChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const next = e.target.value;
+    if (next) {
+      const selected = milestones.find((m) => m.id === next);
+      if (selected?.status === 'completed') {
+        const confirmed = window.confirm('This milestone is already completed. Assign this task to it anyway?');
+        if (!confirmed) return;
+      }
+    }
+    setMilestoneId(next);
+  }
   // See ProjectForm's identical formInstanceKey comment: forces uncontrolled
   // defaultValue-based inputs to re-apply the (possibly newly-merged)
   // `values` after a failed submission, without disturbing controlled state.
@@ -138,7 +155,15 @@ export function TaskForm({ action, initialValues, members, projects, submitLabel
                   id="projectId"
                   name="projectId"
                   value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
+                  onChange={(e) => {
+                    setProjectId(e.target.value);
+                    // The milestone list is scoped to the selected project
+                    // — a milestone id from the previous project would be
+                    // meaningless (or worse, silently rejected server-side
+                    // as belonging to the wrong project) once the project
+                    // changes, so clear it rather than carry it forward.
+                    setMilestoneId('');
+                  }}
                   required
                   className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
                 >
@@ -156,12 +181,23 @@ export function TaskForm({ action, initialValues, members, projects, submitLabel
               <select
                 id="milestoneId"
                 name="milestoneId"
-                defaultValue={values?.milestoneId ?? ''}
+                value={milestoneId}
+                onChange={handleMilestoneChange}
                 className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
               >
                 <option value="">No milestone</option>
                 {milestones.map((m) => (
-                  <option key={m.id} value={m.id}>{m.title}</option>
+                  // Cancelled milestones are disabled for a NEW assignment
+                  // (the server rejects this too — see
+                  // assertMilestoneBelongsToProject in task.service.ts —
+                  // this is just the same rule surfaced before submit) but
+                  // remain selectable if it's already this task's current
+                  // milestone, so an existing (now-cancelled) link isn't
+                  // impossible to leave untouched while editing other fields.
+                  <option key={m.id} value={m.id} disabled={m.status === 'cancelled' && m.id !== values?.milestoneId}>
+                    {m.title}
+                    {m.status === 'completed' ? ' (Completed)' : m.status === 'cancelled' ? ' (Cancelled)' : ''}
+                  </option>
                 ))}
               </select>
               <FieldError errors={fieldErrors.milestoneId} />

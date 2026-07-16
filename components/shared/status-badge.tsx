@@ -11,6 +11,8 @@ import {
   normalizeHealth,
 } from '@/features/projects/constants';
 import { TASK_STATUS_META, DUE_STATE_META, computeDueState, type DueState } from '@/features/tasks/constants';
+import { MILESTONE_STATUS_META, MILESTONE_HEALTH_META } from '@/features/milestones/constants';
+import type { MilestoneStatus, MilestoneHealth } from '@/schemas/milestone.schema';
 
 const TONE_STYLES: Record<string, string> = {
   neutral: 'bg-secondary text-secondary-foreground border-border',
@@ -95,6 +97,32 @@ export function DueStateBadge({ dueAt, status }: { dueAt: string | null; status:
   return (
     <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', TONE_STYLES[meta.tone])}>
       {meta.label}
+    </span>
+  );
+}
+
+export function MilestoneStatusPill({ status }: { status: MilestoneStatus | string }) {
+  const meta = MILESTONE_STATUS_META[status as MilestoneStatus];
+  const tone = meta?.tone ?? 'neutral';
+  return (
+    <span
+      title={meta?.description}
+      className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', TONE_STYLES[tone])}
+    >
+      {meta?.label ?? status}
+    </span>
+  );
+}
+
+/** Milestone's own dedicated health enum — deliberately not the same
+ * component as HealthPill (which normalizes project_health's legacy
+ * on_track value); milestones have no such legacy value to normalize. */
+export function MilestoneHealthPill({ health }: { health: MilestoneHealth | string }) {
+  const meta = MILESTONE_HEALTH_META[health as MilestoneHealth];
+  const tone = meta?.tone ?? 'neutral';
+  return (
+    <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', TONE_STYLES[tone])}>
+      {meta?.label ?? health}
     </span>
   );
 }

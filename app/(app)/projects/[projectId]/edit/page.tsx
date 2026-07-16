@@ -50,6 +50,7 @@ export default async function EditProjectPage({ params }: EditProjectPageProps) 
     healthNote: project.health_note,
     businessImpact: project.business_impact ?? [],
     progressPercent: project.progress_percent,
+    progressMode: project.progress_mode,
   };
 
   const boundAction = updateProject.bind(null, projectId);

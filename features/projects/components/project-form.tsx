@@ -40,6 +40,7 @@ export interface ProjectFormValues {
   healthNote?: string | null;
   businessImpact?: string[];
   progressPercent?: number;
+  progressMode?: string;
 }
 
 interface ProjectFormProps {
@@ -93,6 +94,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
         healthNote: (submitted.healthNote as string) || initialValues?.healthNote,
         businessImpact: (submitted.businessImpact as string[]) ?? initialValues?.businessImpact ?? [],
         progressPercent: submitted.progressPercent ? Number(submitted.progressPercent) : initialValues?.progressPercent,
+        progressMode: (submitted.progressMode as string) ?? initialValues?.progressMode,
       }
     : initialValues ?? {};
 
@@ -100,6 +102,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
   const [focusLevel, setFocusLevel] = useState(values?.focusLevel ?? 3);
   const [health, setHealth] = useState(values?.health ?? 'unknown');
   const [businessImpact, setBusinessImpact] = useState<string[]>(values?.businessImpact ?? []);
+  const [progressMode, setProgressMode] = useState(values?.progressMode ?? 'manual');
 
   const fieldErrors = state.fieldErrors ?? {};
   const healthNoteRequired = health === 'at_risk' || health === 'off_track';
@@ -325,8 +328,28 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
           </div>
 
           <div className="flex flex-col gap-1.5">
+            <Label htmlFor="progressMode">Progress mode</Label>
+            <select
+              id="progressMode"
+              name="progressMode"
+              value={progressMode}
+              onChange={(e) => setProgressMode(e.target.value)}
+              className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
+            >
+              <option value="manual">Manual</option>
+              <option value="milestones">From milestones</option>
+            </select>
+            <HelperText>
+              {progressMode === 'milestones'
+                ? 'Calculated automatically from this project’s non-cancelled milestones (equal weighting).'
+                : 'Set directly below.'}
+            </HelperText>
+          </div>
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="progressPercent">Progress (%)</Label>
-            <HelperText>Manual for now — milestone-derived progress will override this in a future slice.</HelperText>
+            {progressMode === 'milestones' ? (
+              <HelperText>Ignored while Progress mode is &ldquo;From milestones&rdquo; — the milestone roll-up controls this value.</HelperText>
+            ) : null}
             <Input
               id="progressPercent"
               name="progressPercent"
@@ -334,6 +357,7 @@ export function ProjectForm({ action, initialValues, members, submitLabel }: Pro
               min={0}
               max={100}
               step={1}
+              disabled={progressMode === 'milestones'}
               defaultValue={values?.progressPercent ?? 0}
             />
             <FieldError errors={fieldErrors.progressPercent} />

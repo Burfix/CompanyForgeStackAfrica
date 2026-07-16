@@ -68,7 +68,7 @@ async function assertOwnerInOrg(organizationId: string, ownerId: string | undefi
  * `founder_attention_required` is deliberately never taken from raw input — it is always
  * derived from `attentionMode` below, so the two columns can't drift apart (see
  * ATTENTION_MODE_META / attentionModeRequiresFounder in features/projects/constants.ts). */
-function mapInputToPatch(input: Partial<CreateProjectInput | UpdateProjectInput>): TablesUpdate<'projects'> {
+function mapInputToPatch(input: Partial<CreateProjectInput | UpdateProjectInput>, effectiveProgressMode: 'manual' | 'milestones' = 'manual'): TablesUpdate<'projects'> {
   const patch: TablesUpdate<'projects'> = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.category !== undefined) patch.category = input.category;
@@ -95,7 +95,16 @@ function mapInputToPatch(input: Partial<CreateProjectInput | UpdateProjectInput>
   if (input.health !== undefined) patch.health = input.health;
   if (input.healthNote !== undefined) patch.health_note = input.healthNote ?? null;
   if (input.businessImpact !== undefined) patch.business_impact = input.businessImpact;
-  if (input.progressPercent !== undefined) patch.progress_percent = input.progressPercent;
+  if (input.progressMode !== undefined) patch.progress_mode = input.progressMode;
+  // Only honour a client-supplied progress_percent while the EFFECTIVE
+  // progress mode is 'manual' — matches the identical rule on milestones
+  // (see mapInputToPatch in milestone.service.ts). A project that is (or
+  // is becoming) milestone-derived has this silently ignored; its
+  // progress_percent is instead written exclusively by
+  // milestoneService.recalculateProjectProgressFromMilestones.
+  if (effectiveProgressMode === 'manual' && input.progressPercent !== undefined) {
+    patch.progress_percent = input.progressPercent;
+  }
   return patch;
 }
 
@@ -185,7 +194,7 @@ export const projectService = {
       owner_id: input.ownerId ?? actorId,
       slug,
       last_activity_at: new Date().toISOString(),
-      ...mapInputToPatch(input),
+      ...mapInputToPatch(input, input.progressMode),
       // Explicit override after the spread: mapInputToPatch's parameter
       // type is shared with the (all-optional) update path, so TS can't
       // see that `name` and `desiredOutcome` are guaranteed here — they
@@ -214,7 +223,8 @@ export const projectService = {
     const input = updateProjectSchema.parse(rawInput);
     await assertOwnerInOrg(organizationId, input.ownerId);
 
-    const requestedPatch = mapInputToPatch(input);
+    const effectiveProgressMode = (input.progressMode ?? existing.progress_mode ?? 'manual') as 'manual' | 'milestones';
+    const requestedPatch = mapInputToPatch(input, effectiveProgressMode);
     const { changedFields, previousValues, newValues, finalPatch } = diffPatch(existing, requestedPatch);
 
     if (changedFields.length === 0) {

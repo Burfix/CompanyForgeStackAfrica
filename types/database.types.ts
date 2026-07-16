@@ -128,50 +128,115 @@ export type Database = {
       }
       milestones: {
         Row: {
+          attention_mode: Database["public"]["Enums"]["project_attention_mode"]
+          blocked_reason: string | null
           completed_at: string | null
           created_at: string
+          created_by: string | null
+          current_value: string | null
           description: string | null
           due_date: string | null
+          founder_required: boolean
+          health: Database["public"]["Enums"]["milestone_health"]
+          health_note: string | null
           id: string
+          last_activity_at: string
+          next_review_at: string | null
           organization_id: string
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["project_priority_level"]
+          progress_mode: Database["public"]["Enums"]["milestone_progress_mode"]
+          progress_percent: number
           project_id: string
           sort_order: number
+          start_date: string | null
           status: Database["public"]["Enums"]["milestone_status"]
+          success_criteria: string | null
+          target_value: string | null
           title: string
           updated_at: string
+          waiting_on: string | null
         }
         Insert: {
+          attention_mode?: Database["public"]["Enums"]["project_attention_mode"]
+          blocked_reason?: string | null
           completed_at?: string | null
           created_at?: string
+          created_by?: string | null
+          current_value?: string | null
           description?: string | null
           due_date?: string | null
+          founder_required?: boolean
+          health?: Database["public"]["Enums"]["milestone_health"]
+          health_note?: string | null
           id?: string
+          last_activity_at?: string
+          next_review_at?: string | null
           organization_id: string
+          owner_id?: string | null
+          priority?: Database["public"]["Enums"]["project_priority_level"]
+          progress_mode?: Database["public"]["Enums"]["milestone_progress_mode"]
+          progress_percent?: number
           project_id: string
           sort_order?: number
+          start_date?: string | null
           status?: Database["public"]["Enums"]["milestone_status"]
+          success_criteria?: string | null
+          target_value?: string | null
           title: string
           updated_at?: string
+          waiting_on?: string | null
         }
         Update: {
+          attention_mode?: Database["public"]["Enums"]["project_attention_mode"]
+          blocked_reason?: string | null
           completed_at?: string | null
           created_at?: string
+          created_by?: string | null
+          current_value?: string | null
           description?: string | null
           due_date?: string | null
+          founder_required?: boolean
+          health?: Database["public"]["Enums"]["milestone_health"]
+          health_note?: string | null
           id?: string
+          last_activity_at?: string
+          next_review_at?: string | null
           organization_id?: string
+          owner_id?: string | null
+          priority?: Database["public"]["Enums"]["project_priority_level"]
+          progress_mode?: Database["public"]["Enums"]["milestone_progress_mode"]
+          progress_percent?: number
           project_id?: string
           sort_order?: number
+          start_date?: string | null
           status?: Database["public"]["Enums"]["milestone_status"]
+          success_criteria?: string | null
+          target_value?: string | null
           title?: string
           updated_at?: string
+          waiting_on?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "milestones_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "milestones_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "milestones_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -393,6 +458,7 @@ export type Database = {
           owner_id: string | null
           priority_level: Database["public"]["Enums"]["project_priority_level"]
           priority_score: number
+          progress_mode: Database["public"]["Enums"]["project_progress_mode"]
           progress_percent: number
           review_cadence: Database["public"]["Enums"]["project_review_cadence"]
           slug: string | null
@@ -429,6 +495,7 @@ export type Database = {
           owner_id?: string | null
           priority_level?: Database["public"]["Enums"]["project_priority_level"]
           priority_score?: number
+          progress_mode?: Database["public"]["Enums"]["project_progress_mode"]
           progress_percent?: number
           review_cadence?: Database["public"]["Enums"]["project_review_cadence"]
           slug?: string | null
@@ -465,6 +532,7 @@ export type Database = {
           owner_id?: string | null
           priority_level?: Database["public"]["Enums"]["project_priority_level"]
           priority_score?: number
+          progress_mode?: Database["public"]["Enums"]["project_progress_mode"]
           progress_percent?: number
           review_cadence?: Database["public"]["Enums"]["project_review_cadence"]
           slug?: string | null
@@ -632,7 +700,21 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      milestone_status: "pending" | "in_progress" | "completed" | "missed"
+      milestone_health:
+        | "healthy"
+        | "needs_attention"
+        | "at_risk"
+        | "off_track"
+        | "unknown"
+      milestone_progress_mode: "automatic" | "manual"
+      milestone_status:
+        | "pending"
+        | "in_progress"
+        | "completed"
+        | "missed"
+        | "blocked"
+        | "waiting"
+        | "cancelled"
       org_role: "owner" | "admin" | "member" | "viewer"
       project_attention_mode: "founder" | "delegated" | "team" | "no_attention"
       project_dependency_type: "blocks" | "depends_on" | "related_to"
@@ -644,6 +726,7 @@ export type Database = {
         | "needs_attention"
         | "unknown"
       project_priority_level: "urgent" | "high" | "medium" | "low"
+      project_progress_mode: "manual" | "milestones"
       project_review_cadence:
         | "weekly"
         | "biweekly"
@@ -800,7 +883,23 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      milestone_status: ["pending", "in_progress", "completed", "missed"],
+      milestone_health: [
+        "healthy",
+        "needs_attention",
+        "at_risk",
+        "off_track",
+        "unknown",
+      ],
+      milestone_progress_mode: ["automatic", "manual"],
+      milestone_status: [
+        "pending",
+        "in_progress",
+        "completed",
+        "missed",
+        "blocked",
+        "waiting",
+        "cancelled",
+      ],
       org_role: ["owner", "admin", "member", "viewer"],
       project_attention_mode: ["founder", "delegated", "team", "no_attention"],
       project_dependency_type: ["blocks", "depends_on", "related_to"],
@@ -813,6 +912,7 @@ export const Constants = {
         "unknown",
       ],
       project_priority_level: ["urgent", "high", "medium", "low"],
+      project_progress_mode: ["manual", "milestones"],
       project_review_cadence: [
         "weekly",
         "biweekly",

@@ -28,10 +28,17 @@ vi.mock('@/repositories/activity.repository', () => ({
   },
 }));
 
+vi.mock('@/services/milestone.service', () => ({
+  milestoneService: {
+    recalculateMilestoneProgress: vi.fn(),
+  },
+}));
+
 const { tasksRepository } = await import('@/repositories/tasks.repository');
 const { projectsRepository } = await import('@/repositories/projects.repository');
 const { milestonesRepository } = await import('@/repositories/milestones.repository');
 const { activityRepository } = await import('@/repositories/activity.repository');
+const { milestoneService } = await import('@/services/milestone.service');
 const { taskService, assertValidStatusTransition } = await import('./task.service');
 
 const ORG_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -62,7 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (projectsRepository.verifyProjectAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ id: PROJECT_ID, organization_id: ORG_ID });
   (tasksRepository.verifyOwnerBelongsToOrganisation as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-  (milestonesRepository.verifyMilestoneBelongsToProject as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+  (milestonesRepository.verifyMilestoneBelongsToProject as ReturnType<typeof vi.fn>).mockResolvedValue({ belongs: true, status: 'in_progress' });
 });
 
 describe('assertValidStatusTransition', () => {
@@ -135,7 +142,7 @@ describe('taskService.createTask', () => {
   });
 
   it('rejects a milestone that does not belong to the selected project', async () => {
-    (milestonesRepository.verifyMilestoneBelongsToProject as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (milestonesRepository.verifyMilestoneBelongsToProject as ReturnType<typeof vi.fn>).mockResolvedValue({ belongs: false, status: null });
 
     await expect(
       taskService.createTask(ORG_ID, ACTOR_ID, {
@@ -146,6 +153,40 @@ describe('taskService.createTask', () => {
     ).rejects.toBeInstanceOf(BusinessRuleError);
 
     expect(tasksRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning a task to a cancelled milestone (cross-project-style rejection)', async () => {
+    (milestonesRepository.verifyMilestoneBelongsToProject as ReturnType<typeof vi.fn>).mockResolvedValue({ belongs: true, status: 'cancelled' });
+
+    await expect(
+      taskService.createTask(ORG_ID, ACTOR_ID, {
+        title: 'Test Task',
+        projectId: PROJECT_ID,
+        milestoneId: 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee',
+      } as never),
+    ).rejects.toBeInstanceOf(BusinessRuleError);
+
+    expect(tasksRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('recalculates milestone progress after creating a task with a milestone', async () => {
+    (tasksRepository.create as ReturnType<typeof vi.fn>).mockResolvedValue(baseTaskRow({ milestone_id: 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee' }));
+
+    await taskService.createTask(ORG_ID, ACTOR_ID, {
+      title: 'Test Task',
+      projectId: PROJECT_ID,
+      milestoneId: 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee',
+    } as never);
+
+    expect(milestoneService.recalculateMilestoneProgress).toHaveBeenCalledWith(ORG_ID, ACTOR_ID, 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee', 'task_rollup');
+  });
+
+  it('does not trigger any milestone recalculation for a task without a milestone', async () => {
+    (tasksRepository.create as ReturnType<typeof vi.fn>).mockResolvedValue(baseTaskRow());
+
+    await taskService.createTask(ORG_ID, ACTOR_ID, { title: 'Test Task', projectId: PROJECT_ID } as never);
+
+    expect(milestoneService.recalculateMilestoneProgress).not.toHaveBeenCalled();
   });
 
   it('derives founder_required=true from attentionMode=founder', async () => {
@@ -301,6 +342,16 @@ describe('taskService.completeTask', () => {
 
     expect(tasksRepository.update).not.toHaveBeenCalled();
   });
+
+  it('recalculates the milestone this task belongs to', async () => {
+    const existing = baseTaskRow({ status: 'in_progress', milestone_id: 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee' });
+    (tasksRepository.verifyTaskAccess as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+    (tasksRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue({ ...existing, status: 'completed' });
+
+    await taskService.completeTask(ORG_ID, ACTOR_ID, { taskId: TASK_ID });
+
+    expect(milestoneService.recalculateMilestoneProgress).toHaveBeenCalledWith(ORG_ID, ACTOR_ID, 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee', 'task_rollup');
+  });
 });
 
 describe('taskService.reopenTask', () => {
@@ -329,6 +380,16 @@ describe('taskService.reopenTask', () => {
 
     expect(tasksRepository.update).not.toHaveBeenCalled();
   });
+
+  it('recalculates the milestone this task belongs to when reopened', async () => {
+    const existing = baseTaskRow({ status: 'completed', completed_at: new Date().toISOString(), milestone_id: 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee' });
+    (tasksRepository.verifyTaskAccess as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+    (tasksRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue({ ...existing, status: 'planned', completed_at: null });
+
+    await taskService.reopenTask(ORG_ID, ACTOR_ID, { taskId: TASK_ID, targetStatus: 'planned' });
+
+    expect(milestoneService.recalculateMilestoneProgress).toHaveBeenCalledWith(ORG_ID, ACTOR_ID, 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee', 'task_rollup');
+  });
 });
 
 describe('taskService.cancelTask', () => {
@@ -350,6 +411,39 @@ describe('taskService.cancelTask', () => {
     await taskService.cancelTask(ORG_ID, ACTOR_ID, { taskId: TASK_ID });
 
     expect(tasksRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('recalculates the milestone this task belongs to when cancelled', async () => {
+    const existing = baseTaskRow({ status: 'planned', milestone_id: 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee' });
+    (tasksRepository.verifyTaskAccess as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+    (tasksRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue({ ...existing, status: 'cancelled' });
+
+    await taskService.cancelTask(ORG_ID, ACTOR_ID, { taskId: TASK_ID });
+
+    expect(milestoneService.recalculateMilestoneProgress).toHaveBeenCalledWith(ORG_ID, ACTOR_ID, 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee', 'task_rollup');
+  });
+});
+
+describe('taskService.updateTask — milestone roll-up triggers', () => {
+  it('recalculates both milestones when a task moves from one to another', async () => {
+    const existing = baseTaskRow({ milestone_id: 'aaaa1111-eeee-eeee-eeee-eeeeeeeeeeee' });
+    (tasksRepository.verifyTaskAccess as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+    (tasksRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue({ ...existing, milestone_id: 'bbbb2222-eeee-eeee-eeee-eeeeeeeeeeee' });
+
+    await taskService.updateTask(ORG_ID, ACTOR_ID, TASK_ID, { milestoneId: 'bbbb2222-eeee-eeee-eeee-eeeeeeeeeeee' } as never);
+
+    expect(milestoneService.recalculateMilestoneProgress).toHaveBeenCalledWith(ORG_ID, ACTOR_ID, 'aaaa1111-eeee-eeee-eeee-eeeeeeeeeeee', 'task_rollup');
+    expect(milestoneService.recalculateMilestoneProgress).toHaveBeenCalledWith(ORG_ID, ACTOR_ID, 'bbbb2222-eeee-eeee-eeee-eeeeeeeeeeee', 'task_rollup');
+  });
+
+  it('does not trigger any milestone recalculation when neither milestone_id nor status changes', async () => {
+    const existing = baseTaskRow({ milestone_id: 'aaaa1111-eeee-eeee-eeee-eeeeeeeeeeee', title: 'Same' });
+    (tasksRepository.verifyTaskAccess as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+    (tasksRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue({ ...existing, title: 'New' });
+
+    await taskService.updateTask(ORG_ID, ACTOR_ID, TASK_ID, { title: 'New' } as never);
+
+    expect(milestoneService.recalculateMilestoneProgress).not.toHaveBeenCalled();
   });
 });
 

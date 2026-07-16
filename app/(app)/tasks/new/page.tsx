@@ -6,7 +6,7 @@ import { TaskForm } from '@/features/tasks/components/task-form';
 import { createTaskAction } from '@/features/tasks/actions';
 
 interface NewTaskPageProps {
-  searchParams: Promise<{ projectId?: string; returnTo?: string }>;
+  searchParams: Promise<{ projectId?: string; milestoneId?: string; returnTo?: string }>;
 }
 
 export default async function NewTaskPage({ searchParams }: NewTaskPageProps) {
@@ -44,7 +44,7 @@ export default async function NewTaskPage({ searchParams }: NewTaskPageProps) {
         members={members}
         projects={projects}
         submitLabel="Create Task"
-        initialValues={lockProject ? { projectId: params.projectId } : undefined}
+        initialValues={lockProject ? { projectId: params.projectId, milestoneId: params.milestoneId } : undefined}
         lockProject={lockProject}
         returnTo={params.returnTo}
       />

@@ -12,12 +12,18 @@ import {
   AttentionModeBadge,
   TaskStatusPill,
   DueStateBadge,
+  MilestoneStatusPill,
+  MilestoneHealthPill,
 } from '@/components/shared/status-badge';
 import { PRIORITY_LEVEL_SCORE_FALLBACK, FOCUS_LEVEL_META } from '@/features/projects/constants';
 import { computeDueState, taskSortWeight } from '@/features/tasks/constants';
+import { isMilestoneOverdue, isMilestoneDueToday } from '@/features/milestones/constants';
 import type { PriorityLevel } from '@/schemas/project.schema';
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
+
+const MILESTONE_HEALTH_SEVERITY: Record<string, number> = { off_track: 0, at_risk: 1, needs_attention: 2, unknown: 3, healthy: 4 };
+const MILESTONE_PRIORITY_WEIGHT: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 interface FounderHqTask {
   id: string;
@@ -53,7 +59,7 @@ export default async function FounderHQPage() {
   await requireUser();
   const org = await getCurrentOrg();
 
-  const [projects, statusCounts, milestones, activity, taskCounts, allOpenTasks, tasksNeedingAttention, needsAttention] = await Promise.all([
+  const [projects, statusCounts, milestones, activity, taskCounts, allOpenTasks, tasksNeedingAttention, needsAttention, allMilestones, milestonesNeedingAttention] = await Promise.all([
     projectsRepository.listByOrg(org.organizationId),
     projectsRepository.countByStatus(org.organizationId),
     milestonesRepository.listUpcoming(org.organizationId),
@@ -62,6 +68,8 @@ export default async function FounderHQPage() {
     tasksRepository.listTasks(org.organizationId, {}),
     tasksRepository.listTasksNeedingAttention(org.organizationId),
     projectsRepository.listNeedingAttention(org.organizationId),
+    milestonesRepository.listMilestones(org.organizationId),
+    milestonesRepository.listMilestonesNeedingAttention(org.organizationId),
   ]);
 
   const now = new Date();
@@ -107,6 +115,48 @@ export default async function FounderHQPage() {
   // level when ordering projects" requirement. Falls back to priority_score
   // when priority_level maps to the same fallback bucket.
   const orderedProjects = [...projects].sort((a, b) => effectiveScore(b) - effectiveScore(a));
+
+  // Milestone summary — deterministic counts, no AI.
+  const openMilestoneStatuses = new Set(['pending', 'in_progress', 'blocked', 'waiting']);
+  const openMilestones = allMilestones.filter((m) => openMilestoneStatuses.has(m.status));
+  const milestoneDueTodayCount = openMilestones.filter((m) => isMilestoneDueToday(m.due_date, m.status as never, now)).length;
+  const milestoneOverdueCount = openMilestones.filter((m) => isMilestoneOverdue(m.due_date, m.status as never, now)).length;
+  const milestoneBlockedCount = openMilestones.filter((m) => m.status === 'blocked').length;
+  const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const milestonesCompletedThisWeek = allMilestones.filter((m) => m.status === 'completed' && new Date(m.last_activity_at) >= oneWeekAgo).length;
+
+  // Next Major Outcomes: the next open milestone per high-priority (focus
+  // level 1-2) project, ordered by the exact deterministic factors the
+  // spec calls for — overdue, founder required, health severity, priority,
+  // due date, project focus level. No AI ranking.
+  const highPriorityProjectIds = new Set(projects.filter((p) => p.focus_level <= 2).map((p) => p.id));
+  const nextOutcomeByProject = new Map<string, (typeof openMilestones)[number]>();
+  for (const m of [...openMilestones].sort((a, b) => {
+    const aDue = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+    const bDue = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+    return aDue - bDue;
+  })) {
+    if (!highPriorityProjectIds.has(m.project_id)) continue;
+    if (!nextOutcomeByProject.has(m.project_id)) nextOutcomeByProject.set(m.project_id, m);
+  }
+  const nextMajorOutcomes = [...nextOutcomeByProject.values()]
+    .sort((a, b) => {
+      const aOverdue = isMilestoneOverdue(a.due_date, a.status as never, now);
+      const bOverdue = isMilestoneOverdue(b.due_date, b.status as never, now);
+      if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+      if (a.founder_required !== b.founder_required) return a.founder_required ? -1 : 1;
+      const healthDiff = (MILESTONE_HEALTH_SEVERITY[a.health] ?? 9) - (MILESTONE_HEALTH_SEVERITY[b.health] ?? 9);
+      if (healthDiff !== 0) return healthDiff;
+      const priorityDiff = (MILESTONE_PRIORITY_WEIGHT[a.priority] ?? 9) - (MILESTONE_PRIORITY_WEIGHT[b.priority] ?? 9);
+      if (priorityDiff !== 0) return priorityDiff;
+      const aDue = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+      const bDue = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+      if (aDue !== bDue) return aDue - bDue;
+      const aProject = projects.find((p) => p.id === a.project_id);
+      const bProject = projects.find((p) => p.id === b.project_id);
+      return (aProject?.focus_level ?? 9) - (bProject?.focus_level ?? 9);
+    })
+    .slice(0, 5);
 
   return (
     <div className="flex flex-col gap-8">
@@ -254,6 +304,80 @@ export default async function FounderHQPage() {
         </Card>
       </div>
 
+      {/* Milestone summary */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        <Card>
+          <CardHeader><CardTitle>Open Milestones</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{openMilestones.length}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Due Today</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{milestoneDueTodayCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Overdue</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{milestoneOverdueCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Blocked</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{milestoneBlockedCount}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Completed This Week</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold text-foreground">{milestonesCompletedThisWeek}</CardContent>
+        </Card>
+      </div>
+
+      {/* Next Major Outcomes — the next open milestone per high-priority
+          project, deterministically ordered (overdue, founder required,
+          health severity, priority, due date, project focus level). */}
+      {nextMajorOutcomes.length > 0 ? (
+        <Card>
+          <CardHeader><CardTitle>Next Major Outcomes</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {nextMajorOutcomes.map((m) => {
+              const mProject = Array.isArray(m.project) ? m.project[0] : m.project;
+              return (
+                <Link key={m.id} href={`/milestones/${m.id}`} className="flex items-center justify-between rounded-md border border-border px-3 py-2 hover:border-primary/50">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{m.title}</p>
+                    <p className="text-xs text-muted-foreground">{mProject?.name ?? 'No project'}{m.due_date ? ` · Due ${m.due_date}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <MilestoneHealthPill health={m.health} />
+                    <PriorityBadge level={m.priority} />
+                  </div>
+                </Link>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Milestones needing attention */}
+      {milestonesNeedingAttention.length > 0 ? (
+        <Card>
+          <CardHeader><CardTitle>Milestones Needing Attention</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {milestonesNeedingAttention.slice(0, 8).map((m) => {
+              const mProject = Array.isArray(m.project) ? m.project[0] : m.project;
+              return (
+                <Link key={m.id} href={`/milestones/${m.id}`} className="flex items-center justify-between rounded-md border border-border px-3 py-2 hover:border-primary/50">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{m.title}</p>
+                    <p className="text-xs text-muted-foreground">{mProject?.name ?? 'No project'}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <MilestoneStatusPill status={m.status} />
+                    <MilestoneHealthPill health={m.health} />
+                  </div>
+                </Link>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* Tasks needing attention — kept as its own panel alongside (not
           replacing) the project-level Needs Attention panel above. */}
       {tasksNeedingAttention.length > 0 ? (
@@ -288,13 +412,13 @@ export default async function FounderHQPage() {
               <p className="text-sm text-muted-foreground">No upcoming milestones.</p>
             ) : (
               milestones.map((m) => (
-                <div key={m.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                <Link key={m.id} href={`/milestones/${m.id}`} className="flex items-center justify-between rounded-md border border-border px-3 py-2 hover:border-primary/50">
                   <div>
                     <p className="text-sm text-foreground">{m.title}</p>
                     <p className="text-xs text-muted-foreground">{m.projects?.name}</p>
                   </div>
                   <span className="text-xs text-muted-foreground">{m.due_date}</span>
-                </div>
+                </Link>
               ))
             )}
           </CardContent>

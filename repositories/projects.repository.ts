@@ -77,7 +77,7 @@ export const projectsRepository = {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('projects')
-      .select('id, organization_id, name, status, focus_level')
+      .select('id, organization_id, name, status, focus_level, progress_mode, progress_percent')
       .eq('organization_id', organizationId)
       .eq('id', projectId)
       .maybeSingle();
