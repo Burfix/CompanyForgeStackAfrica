@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LayoutDashboard, FolderKanban, Flag, ListChecks, Activity } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, Flag, ListChecks, Activity, Sparkles } from 'lucide-react';
 import { getCurrentOrg } from '@/lib/auth/session';
 
 const NAV_ITEMS = [
@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/milestones', label: 'Milestones', icon: Flag },
   { href: '/tasks', label: 'Tasks', icon: ListChecks },
+  { href: '/chief-of-staff', label: 'Chief of Staff', icon: Sparkles },
   { href: '/activity', label: 'Activity', icon: Activity },
 ];
 

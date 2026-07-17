@@ -16,6 +16,7 @@ import {
   MilestoneHealthPill,
 } from '@/components/shared/status-badge';
 import { PRIORITY_LEVEL_SCORE_FALLBACK, FOCUS_LEVEL_META } from '@/features/projects/constants';
+import { FounderHqChiefOfStaffPanel } from '@/features/chief-of-staff/components/founder-hq-panel';
 import { computeDueState, taskSortWeight } from '@/features/tasks/constants';
 import { isMilestoneOverdue, isMilestoneDueToday } from '@/features/milestones/constants';
 import type { PriorityLevel } from '@/schemas/project.schema';
@@ -164,6 +165,8 @@ export default async function FounderHQPage() {
         <h1 className="text-xl font-semibold text-foreground">Founder HQ</h1>
         <p className="text-sm text-muted-foreground">{org.organizationName} — company overview</p>
       </div>
+
+      <FounderHqChiefOfStaffPanel organizationId={org.organizationId} />
 
       {/* Company health */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

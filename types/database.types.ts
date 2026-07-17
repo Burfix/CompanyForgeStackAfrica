@@ -75,6 +75,172 @@ export type Database = {
           },
         ]
       }
+      chief_of_staff_briefings: {
+        Row: {
+          blockers: Json
+          briefing_date: string
+          briefing_type: string
+          changes_since_previous: Json
+          created_at: string
+          data_as_of: string
+          decisions_required: Json
+          deterministic_snapshot: Json
+          evidence_snapshot: Json
+          executive_summary: string | null
+          generated_at: string | null
+          generated_by: string | null
+          generation_duration_ms: number | null
+          generation_error_code: string | null
+          generation_error_message: string | null
+          id: string
+          model_name: string | null
+          model_provider: string | null
+          observations: Json
+          organization_id: string
+          prompt_version: string
+          risks: Json
+          safe_to_ignore: Json
+          source_latest_activity_at: string | null
+          source_record_count: number
+          status: string
+          title: string
+          top_priorities: Json
+          updated_at: string
+        }
+        Insert: {
+          blockers?: Json
+          briefing_date: string
+          briefing_type: string
+          changes_since_previous?: Json
+          created_at?: string
+          data_as_of: string
+          decisions_required?: Json
+          deterministic_snapshot?: Json
+          evidence_snapshot?: Json
+          executive_summary?: string | null
+          generated_at?: string | null
+          generated_by?: string | null
+          generation_duration_ms?: number | null
+          generation_error_code?: string | null
+          generation_error_message?: string | null
+          id?: string
+          model_name?: string | null
+          model_provider?: string | null
+          observations?: Json
+          organization_id: string
+          prompt_version?: string
+          risks?: Json
+          safe_to_ignore?: Json
+          source_latest_activity_at?: string | null
+          source_record_count?: number
+          status: string
+          title: string
+          top_priorities?: Json
+          updated_at?: string
+        }
+        Update: {
+          blockers?: Json
+          briefing_date?: string
+          briefing_type?: string
+          changes_since_previous?: Json
+          created_at?: string
+          data_as_of?: string
+          decisions_required?: Json
+          deterministic_snapshot?: Json
+          evidence_snapshot?: Json
+          executive_summary?: string | null
+          generated_at?: string | null
+          generated_by?: string | null
+          generation_duration_ms?: number | null
+          generation_error_code?: string | null
+          generation_error_message?: string | null
+          id?: string
+          model_name?: string | null
+          model_provider?: string | null
+          observations?: Json
+          organization_id?: string
+          prompt_version?: string
+          risks?: Json
+          safe_to_ignore?: Json
+          source_latest_activity_at?: string | null
+          source_record_count?: number
+          status?: string
+          title?: string
+          top_priorities?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chief_of_staff_briefings_generated_by_fkey"
+            columns: ["generated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chief_of_staff_briefings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chief_of_staff_feedback: {
+        Row: {
+          briefing_id: string
+          comment: string | null
+          created_at: string
+          feedback_type: string
+          id: string
+          organization_id: string
+          rating: string | null
+          user_id: string
+        }
+        Insert: {
+          briefing_id: string
+          comment?: string | null
+          created_at?: string
+          feedback_type: string
+          id?: string
+          organization_id: string
+          rating?: string | null
+          user_id: string
+        }
+        Update: {
+          briefing_id?: string
+          comment?: string | null
+          created_at?: string
+          feedback_type?: string
+          id?: string
+          organization_id?: string
+          rating?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chief_of_staff_feedback_briefing_id_fkey"
+            columns: ["briefing_id"]
+            isOneToOne: false
+            referencedRelation: "chief_of_staff_briefings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chief_of_staff_feedback_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chief_of_staff_feedback_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invitations: {
         Row: {
           accepted_at: string | null
