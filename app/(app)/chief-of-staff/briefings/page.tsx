@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getCurrentOrg } from '@/lib/auth/session';
 import { listBriefings } from '@/services/chief-of-staff.service';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { getBriefingSourceLabel } from '@/features/chief-of-staff/constants';
 
 const STATUS_LABEL: Record<string, string> = {
   ready: 'AI-generated',
@@ -39,7 +40,8 @@ export default async function ChiefOfStaffBriefingsPage() {
                   <div>
                     <p className="text-sm font-medium text-foreground">{b.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {b.briefing_date} · {b.briefing_type} · {generator?.full_name ?? 'System'}
+                      {b.briefing_date} · {b.briefing_type} · {getBriefingSourceLabel(b.generation_source, b.status)}
+                      {generator?.full_name ? ` · ${generator.full_name}` : ''}
                     </p>
                   </div>
                   <span className="text-xs text-muted-foreground">{STATUS_LABEL[b.status] ?? b.status}</span>

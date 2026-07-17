@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EvidenceLinks } from '@/features/chief-of-staff/components/evidence-links';
 import { FeedbackForm } from '@/features/chief-of-staff/components/feedback-form';
-import { URGENCY_META, CONFIDENCE_META, RISK_CATEGORY_META, BLOCKER_KIND_META, CHANGE_TYPE_META, FRESHNESS_META } from '@/features/chief-of-staff/constants';
+import { URGENCY_META, CONFIDENCE_META, RISK_CATEGORY_META, BLOCKER_KIND_META, CHANGE_TYPE_META, FRESHNESS_META, getBriefingSourceLabel } from '@/features/chief-of-staff/constants';
 import { parseBriefingContent } from '@/features/chief-of-staff/utils';
 import type { ChiefOfStaffFreshness } from '@/types/chief-of-staff';
 import type { Tables } from '@/types/database.types';
@@ -24,6 +24,7 @@ export function BriefingView({ briefing, freshness, showFeedback = true }: { bri
   const content = parseBriefingContent(briefing);
   const freshnessMeta = FRESHNESS_META[freshness];
   const isFallback = briefing.status === 'fallback_ready';
+  const sourceLabel = getBriefingSourceLabel(briefing.generation_source, briefing.status);
 
   return (
     <div className="flex flex-col gap-6">
@@ -31,8 +32,8 @@ export function BriefingView({ briefing, freshness, showFeedback = true }: { bri
         <div>
           <h1 className="text-xl font-semibold text-foreground">{briefing.title}</h1>
           <p className="text-sm text-muted-foreground">
-            Data as of {new Date(briefing.data_as_of).toLocaleString()} · {briefing.briefing_type} briefing
-            {isFallback ? ' · deterministic (AI unavailable)' : briefing.model_name ? ` · ${briefing.model_name}` : ''}
+            Data as of {new Date(briefing.data_as_of).toLocaleString()} · {briefing.briefing_type} briefing · {sourceLabel}
+            {isFallback ? ' (AI unavailable)' : !isFallback && briefing.model_name ? ` · ${briefing.model_name}` : ''}
           </p>
         </div>
         <span className={`text-xs font-medium ${freshnessMeta.className}`}>{freshnessMeta.label}</span>

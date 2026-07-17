@@ -1,5 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
-import { toOperationalError } from '@/lib/errors';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { toOperationalError, BusinessRuleError } from '@/lib/errors';
 import { CHIEF_OF_STAFF_BOUNDS } from '@/features/chief-of-staff/constants';
 import type { Json } from '@/types/database.types';
 
@@ -15,7 +15,20 @@ import type { Json } from '@/types/database.types';
  * display) — this repository is shaped for "what does an evidence packet
  * need," with its own explicit bounds (see CHIEF_OF_STAFF_BOUNDS) so this
  * layer can never accidentally load an unbounded amount of company data.
+ *
+ * `useServiceRole` (Slice 5.1): a narrow, explicit escape hatch accepted by
+ * every method the scheduled/cron generation path touches. Defaults to
+ * false everywhere, so every existing (browser-session) caller is
+ * completely unaffected. It exists because a cron-triggered request has no
+ * Supabase-authenticated user and therefore no `auth.uid()` for RLS to
+ * evaluate — see services/chief-of-staff.service.ts's
+ * generateScheduledDailyBriefing for the only caller that ever passes
+ * `true`, and app/api/cron/chief-of-staff/route.ts for how the target
+ * organisation is resolved safely (never from the request itself).
  */
+function resolveClient(useServiceRole: boolean) {
+  return useServiceRole ? Promise.resolve(createServiceRoleClient()) : createClient();
+}
 
 const PROJECT_EVIDENCE_COLUMNS =
   'id, name, category, owner:profiles!projects_owner_id_fkey(id, full_name), status, focus_level, priority_level, priority_score, health, health_note, progress_percent, progress_mode, attention_mode, founder_required:founder_attention_required, desired_outcome, success_metric, target_value, current_value, target_date, next_review_at, review_cadence, blocked_reason, waiting_on, business_impact, last_activity_at, updated_at, archived_at';
@@ -33,8 +46,8 @@ export const chiefOfStaffRepository = {
    * archived yesterday can still show up in "changes since previous"),
    * matching the spec's "exclude archived unless required for comparison."
    */
-  async loadEvidenceProjects(organizationId: string) {
-    const supabase = await createClient();
+  async loadEvidenceProjects(organizationId: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const cutoff = new Date(Date.now() - CHIEF_OF_STAFF_BOUNDS.activityWindowDays * 24 * 60 * 60 * 1000).toISOString();
 
     const { data, error } = await supabase
@@ -50,9 +63,9 @@ export const chiefOfStaffRepository = {
   },
 
   /** All non-cancelled milestones for the given projects, bounded. */
-  async loadEvidenceMilestones(organizationId: string, projectIds: string[]) {
+  async loadEvidenceMilestones(organizationId: string, projectIds: string[], useServiceRole = false) {
     if (projectIds.length === 0) return [];
-    const supabase = await createClient();
+    const supabase = await resolveClient(useServiceRole);
 
     const { data, error } = await supabase
       .from('milestones')
@@ -69,9 +82,9 @@ export const chiefOfStaffRepository = {
 
   /** All open tasks (bounded) plus a small, time-boxed window of recently
    * completed tasks — never unlimited history. */
-  async loadEvidenceTasks(organizationId: string, projectIds: string[]) {
+  async loadEvidenceTasks(organizationId: string, projectIds: string[], useServiceRole = false) {
     if (projectIds.length === 0) return [];
-    const supabase = await createClient();
+    const supabase = await resolveClient(useServiceRole);
     const completedCutoff = new Date(
       Date.now() - CHIEF_OF_STAFF_BOUNDS.recentlyCompletedTaskWindowDays * 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -105,8 +118,8 @@ export const chiefOfStaffRepository = {
   /** Recent activity, bounded by both a time window and a hard row limit
    * — whichever is smaller wins, per the spec's "last 7 days, maximum 200
    * events." */
-  async loadRecentActivity(organizationId: string) {
-    const supabase = await createClient();
+  async loadRecentActivity(organizationId: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const cutoff = new Date(Date.now() - CHIEF_OF_STAFF_BOUNDS.activityWindowDays * 24 * 60 * 60 * 1000).toISOString();
 
     const { data, error } = await supabase
@@ -129,8 +142,8 @@ export const chiefOfStaffRepository = {
    * would perform a live, potentially expensive read-through-write-path
    * check); it only reads the last recorded run.
    */
-  async loadLastReconciliationRun(organizationId: string) {
-    const supabase = await createClient();
+  async loadLastReconciliationRun(organizationId: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const { data, error } = await supabase
       .from('activity_events')
       .select('occurred_at, metadata')
@@ -148,8 +161,8 @@ export const chiefOfStaffRepository = {
    * organisation — used both to render "latest briefing" and as the prior
    * snapshot for change detection. Explicitly excludes 'generating' (which
    * may be an abandoned/stale record) and 'failed'. */
-  async getLatestReadyBriefing(organizationId: string) {
-    const supabase = await createClient();
+  async getLatestReadyBriefing(organizationId: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const { data, error } = await supabase
       .from('chief_of_staff_briefings')
       .select('*')
@@ -160,6 +173,28 @@ export const chiefOfStaffRepository = {
       .maybeSingle();
 
     if (error) throw toOperationalError(error, 'Could not load the latest briefing.');
+    return data;
+  },
+
+  /** Whether a ready/fallback_ready DAILY briefing already exists for this
+   * organisation and calendar date — the read-side of the daily
+   * idempotency check (Slice 5.1). A 'generating' or 'failed' record for
+   * the same date does NOT count as existing here: 'generating' is
+   * handled separately by the active/stale-generation checks, and a prior
+   * 'failed' attempt must be allowed to retry. */
+  async getDailyBriefingForDate(organizationId: string, briefingDate: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
+    const { data, error } = await supabase
+      .from('chief_of_staff_briefings')
+      .select('id, status')
+      .eq('organization_id', organizationId)
+      .eq('briefing_date', briefingDate)
+      .eq('briefing_type', 'daily')
+      .in('status', ['ready', 'fallback_ready'])
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw toOperationalError(error, 'Could not check for an existing daily briefing.');
     return data;
   },
 
@@ -181,7 +216,7 @@ export const chiefOfStaffRepository = {
     const { data, error } = await supabase
       .from('chief_of_staff_briefings')
       .select(
-        'id, briefing_date, briefing_type, status, title, top_priorities, generated_by, generated_at, model_provider, model_name, data_as_of, generator:profiles!chief_of_staff_briefings_generated_by_fkey(full_name)',
+        'id, briefing_date, briefing_type, status, title, top_priorities, generated_by, generated_at, generation_source, model_provider, model_name, data_as_of, generator:profiles!chief_of_staff_briefings_generated_by_fkey(full_name)',
       )
       .eq('organization_id', organizationId)
       .order('created_at', { ascending: false })
@@ -193,8 +228,8 @@ export const chiefOfStaffRepository = {
 
   /** Any briefing(s) for this org currently stuck in 'generating' —
    * used by the stale-generation recovery rule (Part 29). */
-  async listStaleGeneratingBriefings(organizationId: string, olderThanMinutes: number) {
-    const supabase = await createClient();
+  async listStaleGeneratingBriefings(organizationId: string, olderThanMinutes: number, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000).toISOString();
 
     const { data, error } = await supabase
@@ -208,8 +243,8 @@ export const chiefOfStaffRepository = {
     return data;
   },
 
-  async listActiveGeneratingBriefings(organizationId: string) {
-    const supabase = await createClient();
+  async listActiveGeneratingBriefings(organizationId: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const { data, error } = await supabase
       .from('chief_of_staff_briefings')
       .select('id, created_at')
@@ -220,19 +255,37 @@ export const chiefOfStaffRepository = {
     return data;
   },
 
-  async createGeneratingRecord(input: {
-    organizationId: string;
-    briefingDate: string;
-    briefingType: 'daily' | 'manual';
-    dataAsOf: string;
-  }) {
-    const supabase = await createClient();
+  /**
+   * Starts a new 'generating' record. For daily briefings, the unique
+   * partial index `chief_of_staff_briefings_one_current_daily`
+   * (organization_id, briefing_date where briefing_type='daily' and
+   * status<>'superseded') is the ATOMIC backstop for idempotency: if two
+   * concurrent cron invocations both pass the read-side
+   * `getDailyBriefingForDate` check (a real but narrow race window),
+   * exactly one of these inserts succeeds and the other hits a unique
+   * violation (Postgres error code 23505), which is translated into a
+   * BusinessRuleError('DUPLICATE_DAILY_BRIEFING') rather than a generic
+   * operational error, so the caller can treat it as "already generated"
+   * instead of a failure.
+   */
+  async createGeneratingRecord(
+    input: {
+      organizationId: string;
+      briefingDate: string;
+      briefingType: 'daily' | 'manual';
+      dataAsOf: string;
+      generationSource: 'manual' | 'cron';
+    },
+    useServiceRole = false,
+  ) {
+    const supabase = await resolveClient(useServiceRole);
     const { data, error } = await supabase
       .from('chief_of_staff_briefings')
       .insert({
         organization_id: input.organizationId,
         briefing_date: input.briefingDate,
         briefing_type: input.briefingType,
+        generation_source: input.generationSource,
         status: 'generating',
         title: 'Generating…',
         data_as_of: input.dataAsOf,
@@ -240,12 +293,20 @@ export const chiefOfStaffRepository = {
       .select()
       .single();
 
-    if (error) throw toOperationalError(error, 'Could not start briefing generation.');
+    if (error) {
+      if (error.code === '23505') {
+        throw new BusinessRuleError(
+          'A daily briefing already exists for this organisation and date.',
+          'DUPLICATE_DAILY_BRIEFING',
+        );
+      }
+      throw toOperationalError(error, 'Could not start briefing generation.');
+    }
     return data;
   },
 
-  async markBriefingFailed(id: string, errorCode: string, errorMessage: string) {
-    const supabase = await createClient();
+  async markBriefingFailed(id: string, errorCode: string, errorMessage: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const { error } = await supabase
       .from('chief_of_staff_briefings')
       .update({ status: 'failed', generation_error_code: errorCode, generation_error_message: errorMessage })
@@ -254,8 +315,8 @@ export const chiefOfStaffRepository = {
     if (error) throw toOperationalError(error, 'Could not record generation failure.');
   },
 
-  async supersedePreviousBriefings(organizationId: string, briefingDate: string, exceptId: string) {
-    const supabase = await createClient();
+  async supersedePreviousBriefings(organizationId: string, briefingDate: string, exceptId: string, useServiceRole = false) {
+    const supabase = await resolveClient(useServiceRole);
     const { error } = await supabase
       .from('chief_of_staff_briefings')
       .update({ status: 'superseded' })
@@ -289,13 +350,14 @@ export const chiefOfStaffRepository = {
       model_name: string | null;
       prompt_version: string;
       generation_duration_ms: number;
-      generated_by: string;
+      generated_by: string | null;
       generated_at: string;
       generation_error_code?: string | null;
       generation_error_message?: string | null;
     },
+    useServiceRole = false,
   ) {
-    const supabase = await createClient();
+    const supabase = await resolveClient(useServiceRole);
     const { data, error } = await supabase.from('chief_of_staff_briefings').update(patch).eq('id', id).select().single();
 
     if (error) throw toOperationalError(error, 'Could not save the generated briefing.');

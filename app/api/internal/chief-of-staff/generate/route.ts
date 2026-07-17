@@ -8,11 +8,14 @@ import { BusinessRuleError } from '@/lib/errors';
 /**
  * POST /api/internal/chief-of-staff/generate
  *
- * Route-handler entry point for briefing generation, alongside the
- * features/chief-of-staff/actions.ts Server Action — this exists for the
- * daily scheduled generation (invoked by a cron/scheduler, not the UI) and
- * for parity with the existing internal reconciliation route's security
- * posture:
+ * Browser-session (manual) generation only. Requires an authenticated
+ * owner/admin — see requireUser()/getCurrentOrg() below. Unattended daily
+ * generation is a SEPARATE route (GET /api/cron/chief-of-staff, see
+ * app/api/cron/chief-of-staff/route.ts) authenticated via CRON_SECRET
+ * instead of a session, precisely so this route's session requirement is
+ * never weakened or bypassed to accommodate a machine caller (Slice 5.1).
+ * This route's security posture otherwise mirrors the existing internal
+ * reconciliation route:
  *  - authentication required before anything else runs
  *  - organization is resolved server-side from the session, never from
  *    the request body
@@ -53,7 +56,8 @@ export async function POST(request: Request) {
     const briefing = await generateBriefing({
       organizationId: org.organizationId,
       organizationName: org.organizationName,
-      userId: user.id,
+      generatedBy: user.id,
+      generationSource: 'manual',
       briefingType: parsed.data.briefingType,
       force: parsed.data.force,
     });

@@ -92,6 +92,7 @@ export type Database = {
           generation_duration_ms: number | null
           generation_error_code: string | null
           generation_error_message: string | null
+          generation_source: string
           id: string
           model_name: string | null
           model_provider: string | null
@@ -123,6 +124,7 @@ export type Database = {
           generation_duration_ms?: number | null
           generation_error_code?: string | null
           generation_error_message?: string | null
+          generation_source?: string
           id?: string
           model_name?: string | null
           model_provider?: string | null
@@ -154,6 +156,7 @@ export type Database = {
           generation_duration_ms?: number | null
           generation_error_code?: string | null
           generation_error_message?: string | null
+          generation_source?: string
           id?: string
           model_name?: string | null
           model_provider?: string | null

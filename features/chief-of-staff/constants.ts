@@ -85,6 +85,17 @@ export const CHIEF_OF_STAFF_BOUNDS = {
   staleGenerationRecoveryMinutes: 10,
 } as const;
 
+/**
+ * Small display label for how a briefing was triggered (Slice 5.1) —
+ * "Fallback" takes precedence over source, since a founder reading a
+ * fallback_ready briefing cares first that it's deterministic-only, not
+ * whether cron or a person kicked it off.
+ */
+export function getBriefingSourceLabel(generationSource: string, status: string): 'Scheduled' | 'Manual' | 'Fallback' {
+  if (status === 'fallback_ready') return 'Fallback';
+  return generationSource === 'cron' ? 'Scheduled' : 'Manual';
+}
+
 /** Server-validated route builder for evidence links — the model never
  * supplies a URL; the UI always derives it from entity_type/entity_id
  * through this single function, so an arbitrary or cross-organisation URL

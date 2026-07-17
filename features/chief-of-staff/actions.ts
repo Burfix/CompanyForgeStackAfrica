@@ -44,7 +44,8 @@ export async function generateBriefingAction(
     const briefing = await generateBriefing({
       organizationId: org.organizationId,
       organizationName: org.organizationName,
-      userId: user.id,
+      generatedBy: user.id,
+      generationSource: 'manual',
       briefingType: parsed.data.briefingType,
       force: parsed.data.force,
     });

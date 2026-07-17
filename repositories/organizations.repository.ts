@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { toOperationalError } from '@/lib/errors';
 
 /**
@@ -7,8 +7,18 @@ import { toOperationalError } from '@/lib/errors';
  * never call `supabase.from(...)` directly.
  */
 export const organizationsRepository = {
-  async getById(organizationId: string) {
-    const supabase = await createClient();
+  /**
+   * `useServiceRole` is a narrow, explicit escape hatch for the Chief of
+   * Staff cron path (see services/chief-of-staff.service.ts's
+   * generateScheduledDailyBriefing), which runs with no Supabase-authenticated
+   * session and therefore no `auth.uid()` for RLS to evaluate. It defaults
+   * to false so every existing caller (which always has a real user
+   * session) is completely unaffected. Never set this from a value that
+   * originates in a request body/header — only from server-side
+   * configuration already validated at the route boundary.
+   */
+  async getById(organizationId: string, useServiceRole = false) {
+    const supabase = useServiceRole ? createServiceRoleClient() : await createClient();
     const { data, error } = await supabase
       .from('organizations')
       .select('id, name, slug, created_at')
