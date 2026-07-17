@@ -28,12 +28,14 @@ import type { Tables, TablesInsert, TablesUpdate, Json } from '@/types/database.
 type MilestoneRow = Tables<'milestones'>;
 
 async function assertMilestoneInOrg(organizationId: string, milestoneId: string): Promise<MilestoneRow> {
-  // Deliberately fetches the FULL row (getMilestoneById), not the slim
-  // verifyMilestoneAccess projection — diffPatch below needs every column
-  // that might appear in a patch to be present on `existing`, or unrelated
-  // fields would spuriously show up as "changed" every time (existing[key]
-  // would be `undefined` rather than the real stored value).
-  const milestone = await milestonesRepository.getMilestoneById(organizationId, milestoneId);
+  // Deliberately fetches the FULL canonical row (getMilestoneForMutation),
+  // not the slim verifyMilestoneAccess projection — diffPatch below needs
+  // every column that might appear in a patch to be present on `existing`,
+  // or unrelated fields would spuriously show up as "changed" every time
+  // (existing[key] would be `undefined` rather than the real stored
+  // value). Same canonical-read convention as assertProjectInOrg /
+  // assertTaskInOrg in project.service.ts / task.service.ts.
+  const milestone = await milestonesRepository.getMilestoneForMutation(organizationId, milestoneId);
   if (!milestone) {
     // Same "never confirm which" behavior as projects/tasks: identical
     // message whether the milestone doesn't exist or belongs to another org.

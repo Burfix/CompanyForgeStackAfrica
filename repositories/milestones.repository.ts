@@ -94,6 +94,29 @@ export const milestonesRepository = {
     return data;
   },
 
+  /**
+   * Canonical full-row read for mutation comparisons — same rationale and
+   * convention as projectsRepository.getProjectForMutation /
+   * tasksRepository.getTaskForMutation. Uses the same MILESTONE_COLUMNS
+   * projection as getMilestoneById minus the `creator` relation join
+   * (mutation diffing never needs it) — milestone.service.ts already used
+   * getMilestoneById for exactly this purpose from Slice 4 onward; this
+   * method gives that same canonical read the same name used for Projects
+   * and Tasks, rather than three different call patterns for one concept.
+   */
+  async getMilestoneForMutation(organizationId: string, milestoneId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('milestones')
+      .select(MILESTONE_COLUMNS)
+      .eq('organization_id', organizationId)
+      .eq('id', milestoneId)
+      .maybeSingle();
+
+    if (error) throw toOperationalError(error, 'Could not load milestone.');
+    return data;
+  },
+
   /** True milestone-level access check, independent of any list query —
    * same "not found or not yours" checkpoint pattern as
    * projectsRepository.verifyProjectAccess / tasksRepository.verifyTaskAccess. */

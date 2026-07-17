@@ -47,7 +47,19 @@ async function generateUniqueSlug(organizationId: string, name: string, excludeP
 }
 
 async function assertProjectInOrg(organizationId: string, projectId: string): Promise<ProjectRow> {
-  const project = await projectsRepository.verifyProjectAccess(organizationId, projectId);
+  // Deliberately fetches the FULL canonical row (getProjectForMutation),
+  // not the slim verifyProjectAccess projection — diffPatch below needs
+  // every column that might appear in a patch to be present on `existing`,
+  // or unrelated fields would spuriously show up as "changed" every time
+  // (existing[key] would be `undefined` rather than the real stored
+  // value). This was the confirmed Slice 4.5 Risk 1 bug: verifyProjectAccess
+  // only selected 6 columns, so updateProject's diff against it falsely
+  // flagged category/description/owner/desired_outcome/dates/health/
+  // priority/business_impact/etc. as changed on every submission, even
+  // when resubmitted identically. Same canonical-read convention as
+  // assertTaskInOrg in task.service.ts / assertMilestoneInOrg in
+  // milestone.service.ts.
+  const project = await projectsRepository.getProjectForMutation(organizationId, projectId);
   if (!project) {
     // Deliberately identical message whether the project doesn't exist at
     // all or belongs to a different org — never confirm which.

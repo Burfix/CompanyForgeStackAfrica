@@ -15,6 +15,21 @@ export interface ProjectListFilters {
 const PROJECT_LIST_COLUMNS =
   'id, name, category, status, focus_level, health, health_note, target_date, start_date, next_review_at, review_cadence, owner_id, priority_score, priority_level, progress_percent, attention_mode, business_impact, desired_outcome, founder_attention_required, last_activity_at, slug, owner:profiles!projects_owner_id_fkey(id, full_name)';
 
+/**
+ * Every physical, mutable column on `projects` — the single canonical
+ * projection for anything that diffs a patch against "the current row".
+ * Centralised here (rather than assembled ad hoc per call site) so that a
+ * new mutable column added to the schema only needs to be added in ONE
+ * place to keep no-op detection correct; see
+ * lib/diff-patch.ts and services/project.service.ts.
+ *
+ * Deliberately does NOT include the `owner` relation join — mutation
+ * diffing only ever needs scalar columns, and pulling in a relation here
+ * would be a wasted join on every write path.
+ */
+const PROJECT_MUTATION_COLUMNS =
+  'id, organization_id, name, slug, category, description, owner_id, status, focus_level, desired_outcome, success_metric, target_value, current_value, target_outcome, start_date, target_date, due_date, next_review_at, review_cadence, blocked_reason, waiting_on, attention_mode, founder_attention_required, priority_level, priority_score, health, health_note, business_impact, progress_mode, progress_percent, archived_at, created_by, created_at, updated_at, last_activity_at';
+
 export const projectsRepository = {
   /** Full portfolio view with search/filter/sort — powers /projects. */
   async listProjects(organizationId: string, filters: ProjectListFilters = {}) {
@@ -83,6 +98,31 @@ export const projectsRepository = {
       .maybeSingle();
 
     if (error) throw toOperationalError(error, 'Could not verify project access.');
+    return data;
+  },
+
+  /**
+   * Canonical full-row read for mutation comparisons. Every service method
+   * that computes a patch and diffs it against "the existing row" (see
+   * lib/diff-patch.ts) MUST load `existing` through this method, never
+   * through verifyProjectAccess's slim projection — a field omitted from a
+   * partial select reads back as `undefined`, and diffPatch would then
+   * treat any submitted value for that field as "changed" even when it's
+   * identical to what's already stored. Org- and id-scoped, same "not
+   * found or not yours" shape as verifyProjectAccess (returns null rather
+   * than throwing on a missing/foreign row — the caller decides whether
+   * that's a NotFoundError).
+   */
+  async getProjectForMutation(organizationId: string, projectId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('projects')
+      .select(PROJECT_MUTATION_COLUMNS)
+      .eq('organization_id', organizationId)
+      .eq('id', projectId)
+      .maybeSingle();
+
+    if (error) throw toOperationalError(error, 'Could not load project.');
     return data;
   },
 

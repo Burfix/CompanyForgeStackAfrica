@@ -31,6 +31,11 @@ export function TaskActions({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Non-fatal: the mutation itself succeeded, but its milestone/project
+  // roll-up could not be refreshed automatically (Slice 4.5 Part 9) — see
+  // taskService.recalcMilestoneIfPresent. Shown distinctly from `error`
+  // since the action did NOT fail.
+  const [warning, setWarning] = useState<string | null>(null);
 
   const isTerminal = currentStatus === 'completed' || currentStatus === 'cancelled';
 
@@ -48,10 +53,14 @@ export function TaskActions({
       if (!reason) return;
       waitingOn = reason;
     }
+    setWarning(null);
     startTransition(async () => {
       const result = await updateTaskStatusAction(taskId, nextStatus, { blockedReason, waitingOn });
       if (result.formError) setError(result.formError);
-      else router.refresh();
+      else {
+        if (result.warning) setWarning(result.warning);
+        router.refresh();
+      }
     });
   }
 
@@ -66,32 +75,44 @@ export function TaskActions({
 
   function handleComplete() {
     setError(null);
+    setWarning(null);
     startTransition(async () => {
       const result = await completeTaskAction(taskId);
       if (result.formError) setError(result.formError);
-      else router.refresh();
+      else {
+        if (result.warning) setWarning(result.warning);
+        router.refresh();
+      }
     });
   }
 
   function handleReopen() {
     setError(null);
+    setWarning(null);
     const confirmed = window.confirm('Reopen this task? It will move back to Planned.');
     if (!confirmed) return;
     startTransition(async () => {
       const result = await reopenTaskAction(taskId, 'planned');
       if (result.formError) setError(result.formError);
-      else router.refresh();
+      else {
+        if (result.warning) setWarning(result.warning);
+        router.refresh();
+      }
     });
   }
 
   function handleCancel() {
     setError(null);
+    setWarning(null);
     const confirmed = window.confirm('Cancel this task? It will be marked as no longer required.');
     if (!confirmed) return;
     startTransition(async () => {
       const result = await cancelTaskAction(taskId);
       if (result.formError) setError(result.formError);
-      else router.refresh();
+      else {
+        if (result.warning) setWarning(result.warning);
+        router.refresh();
+      }
     });
   }
 
@@ -140,6 +161,7 @@ export function TaskActions({
         )}
       </div>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {!error && warning ? <p className="text-xs text-muted-foreground">{warning}</p> : null}
     </div>
   );
 }

@@ -18,6 +18,17 @@ export interface TaskListFilters {
 const TASK_LIST_COLUMNS =
   'id, title, status, priority, project_id, milestone_id, assignee_id, attention_mode, founder_required, due_at, start_at, completed_at, blocked_reason, waiting_on, next_action, estimated_minutes, actual_minutes, last_activity_at, created_at, project:projects!tasks_project_id_fkey(id, name), owner:profiles!tasks_assignee_id_fkey(id, full_name)';
 
+/**
+ * Every physical, mutable column on `tasks` — the single canonical
+ * projection for anything that diffs a patch against "the current row".
+ * Same convention and rationale as PROJECT_MUTATION_COLUMNS in
+ * projects.repository.ts / MILESTONE_COLUMNS in milestones.repository.ts:
+ * one place to update when a new mutable column is added, so no-op
+ * detection can never silently regress by omission.
+ */
+const TASK_MUTATION_COLUMNS =
+  'id, organization_id, project_id, milestone_id, title, notes, assignee_id, status, priority, attention_mode, founder_required, due_at, due_date, start_at, estimated_minutes, actual_minutes, blocked_reason, waiting_on, next_action, source_type, source_reference, completed_at, created_by, created_at, updated_at, last_activity_at';
+
 const SORT_COLUMN_MAP: Record<TaskSortOption, string> = {
   default: 'due_at',
   due_at: 'due_at',
@@ -105,6 +116,30 @@ export const tasksRepository = {
       .maybeSingle();
 
     if (error) throw toOperationalError(error, 'Could not verify task access.');
+    return data;
+  },
+
+  /**
+   * Canonical full-row read for mutation comparisons — see
+   * projectsRepository.getProjectForMutation for the full rationale. Every
+   * task service method that diffs a patch against "the existing row"
+   * MUST load `existing` through this method, never through
+   * verifyTaskAccess's slim projection (which omits milestone_id, notes,
+   * due_at, start_at, estimated/actual_minutes, blocked_reason,
+   * waiting_on, next_action, source_type/reference — any of those being
+   * absent from `existing` would make diffPatch treat a resubmitted,
+   * unchanged value as "changed").
+   */
+  async getTaskForMutation(organizationId: string, taskId: string) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(TASK_MUTATION_COLUMNS)
+      .eq('organization_id', organizationId)
+      .eq('id', taskId)
+      .maybeSingle();
+
+    if (error) throw toOperationalError(error, 'Could not load task.');
     return data;
   },
 

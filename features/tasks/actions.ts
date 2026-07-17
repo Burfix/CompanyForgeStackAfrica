@@ -19,6 +19,15 @@ export interface TaskActionState {
    * Mirrors the identical fix in features/projects/actions.ts.
    */
   submittedValues?: Record<string, string | string[]>;
+  /**
+   * A non-fatal notice (Slice 4.5 Part 9): the task mutation itself
+   * succeeded, but its milestone/project progress roll-up could not be
+   * refreshed automatically. Distinct from `formError` — the caller
+   * should still treat this as success (redirect/close the form/etc.),
+   * just surface the notice so the user knows to expect a brief lag or to
+   * run reconciliation from System Health.
+   */
+  warning?: string;
 }
 
 function extractSubmittedValues(formData: FormData): Record<string, string | string[]> {
@@ -74,7 +83,7 @@ export async function createTaskAction(_prevState: TaskActionState, formData: Fo
 
   let task;
   try {
-    task = await taskService.createTask(org.organizationId, user.id, parseCreateInput(formData));
+    ({ task } = await taskService.createTask(org.organizationId, user.id, parseCreateInput(formData)));
   } catch (error) {
     const submittedValues = extractSubmittedValues(formData);
     if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error), submittedValues };
@@ -82,6 +91,11 @@ export async function createTaskAction(_prevState: TaskActionState, formData: Fo
     return { formError: 'Could not create the task. Please try again.', submittedValues };
   }
 
+  // Note: a roll-up warning here (if any) is logged server-side in
+  // taskService.createTask / recalcMilestoneIfPresent — this redirects
+  // immediately on success, same as every other create action, so there's
+  // no return path to carry a warning through. It is not lost, just not
+  // shown inline on this particular transition.
   revalidateTaskViews(task.id, task.project_id);
   const returnTo = formData.get('returnTo');
   redirect(typeof returnTo === 'string' && returnTo ? returnTo : `/tasks/${task.id}`);
@@ -94,7 +108,7 @@ export async function updateTaskAction(taskId: string, _prevState: TaskActionSta
   const input = parseCreateInput(formData) as UpdateTaskInput;
   let updated;
   try {
-    updated = await taskService.updateTask(org.organizationId, user.id, taskId, input);
+    ({ task: updated } = await taskService.updateTask(org.organizationId, user.id, taskId, input));
   } catch (error) {
     const submittedValues = extractSubmittedValues(formData);
     if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error), submittedValues };
@@ -116,14 +130,15 @@ export async function updateTaskStatusAction(
   const org = await getCurrentOrg();
 
   let updated;
+  let warning: string | undefined;
   try {
-    updated = await taskService.updateTaskStatus(org.organizationId, user.id, {
+    ({ task: updated, warning } = await taskService.updateTaskStatus(org.organizationId, user.id, {
       taskId,
       status: status as never,
       blockedReason: options?.blockedReason,
       waitingOn: options?.waitingOn,
       reason: options?.reason,
-    });
+    }));
   } catch (error) {
     if (error instanceof z.ZodError) return { fieldErrors: zodFieldErrors(error) };
     if (error instanceof NotFoundError) return { formError: 'Task not found.' };
@@ -132,7 +147,7 @@ export async function updateTaskStatusAction(
   }
 
   revalidateTaskViews(taskId, updated.project_id);
-  return { success: true };
+  return { success: true, warning };
 }
 
 export async function updateTaskPriorityAction(taskId: string, priority: string, reason?: string): Promise<TaskActionState> {
@@ -173,15 +188,16 @@ export async function completeTaskAction(taskId: string, actualMinutes?: number)
   const org = await getCurrentOrg();
 
   let updated;
+  let warning: string | undefined;
   try {
-    updated = await taskService.completeTask(org.organizationId, user.id, { taskId, actualMinutes });
+    ({ task: updated, warning } = await taskService.completeTask(org.organizationId, user.id, { taskId, actualMinutes }));
   } catch (error) {
     if (error instanceof NotFoundError) return { formError: 'Task not found.' };
     return { formError: 'Could not complete the task. Please try again.' };
   }
 
   revalidateTaskViews(taskId, updated.project_id);
-  return { success: true };
+  return { success: true, warning };
 }
 
 export async function reopenTaskAction(taskId: string, targetStatus: 'planned' | 'in_progress', reason?: string): Promise<TaskActionState> {
@@ -189,8 +205,9 @@ export async function reopenTaskAction(taskId: string, targetStatus: 'planned' |
   const org = await getCurrentOrg();
 
   let updated;
+  let warning: string | undefined;
   try {
-    updated = await taskService.reopenTask(org.organizationId, user.id, { taskId, targetStatus, reason });
+    ({ task: updated, warning } = await taskService.reopenTask(org.organizationId, user.id, { taskId, targetStatus, reason }));
   } catch (error) {
     if (error instanceof NotFoundError) return { formError: 'Task not found.' };
     if (error instanceof BusinessRuleError) return { formError: error.message };
@@ -198,7 +215,7 @@ export async function reopenTaskAction(taskId: string, targetStatus: 'planned' |
   }
 
   revalidateTaskViews(taskId, updated.project_id);
-  return { success: true };
+  return { success: true, warning };
 }
 
 export async function cancelTaskAction(taskId: string, reason?: string): Promise<TaskActionState> {
@@ -206,13 +223,14 @@ export async function cancelTaskAction(taskId: string, reason?: string): Promise
   const org = await getCurrentOrg();
 
   let updated;
+  let warning: string | undefined;
   try {
-    updated = await taskService.cancelTask(org.organizationId, user.id, { taskId, reason });
+    ({ task: updated, warning } = await taskService.cancelTask(org.organizationId, user.id, { taskId, reason }));
   } catch (error) {
     if (error instanceof NotFoundError) return { formError: 'Task not found.' };
     return { formError: 'Could not cancel the task. Please try again.' };
   }
 
   revalidateTaskViews(taskId, updated.project_id);
-  return { success: true };
+  return { success: true, warning };
 }

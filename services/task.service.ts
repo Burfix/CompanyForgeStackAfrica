@@ -61,7 +61,21 @@ export function assertValidStatusTransition(from: TaskStatus, to: TaskStatus): v
 }
 
 async function assertTaskInOrg(organizationId: string, taskId: string): Promise<TaskRow> {
-  const task = await tasksRepository.verifyTaskAccess(organizationId, taskId);
+  // Deliberately fetches the FULL canonical row (getTaskForMutation), not
+  // the slim verifyTaskAccess projection — diffPatch below needs every
+  // column that might appear in a patch to be present on `existing`, or
+  // unrelated fields would spuriously show up as "changed" every time
+  // (existing[key] would be `undefined` rather than the real stored
+  // value). This was the confirmed Slice 4.5 Risk 1 bug: verifyTaskAccess
+  // only selected 9 columns, omitting milestone_id, notes, due_at,
+  // start_at, estimated/actual_minutes, blocked_reason, waiting_on,
+  // next_action, source_type/reference — any resubmitted-but-unchanged
+  // value for those would falsely register as a change AND, in
+  // milestone_id's case, falsely trigger a milestone/project progress
+  // recalculation on every update. Same canonical-read convention as
+  // assertProjectInOrg in project.service.ts / assertMilestoneInOrg in
+  // milestone.service.ts.
+  const task = await tasksRepository.getTaskForMutation(organizationId, taskId);
   if (!task) {
     // Same "never confirm which" behavior as projects: identical message
     // whether the task doesn't exist or belongs to a different org.
@@ -107,12 +121,34 @@ async function assertMilestoneBelongsToProject(organizationId: string, milestone
   }
 }
 
-/** Fire-and-await milestone progress recalculation, but only when a task
+/**
+ * Fire-and-await milestone progress recalculation, but only when a task
  * actually has a milestone attached — a task with no milestone_id should
- * never trigger any milestone or project roll-up work. */
-async function recalcMilestoneIfPresent(organizationId: string, actorId: string, milestoneId: string | null | undefined) {
-  if (!milestoneId) return;
-  await milestoneService.recalculateMilestoneProgress(organizationId, actorId, milestoneId, 'task_rollup');
+ * never trigger any milestone or project roll-up work.
+ *
+ * IMPORTANT — failure isolation (Slice 4.5 Part 9): the primary task
+ * mutation has already succeeded by the time this runs. There is no
+ * shared database transaction between "write the task" and "recalculate
+ * its milestone/project roll-up" (see the transaction-honesty comments in
+ * milestone.service.ts / milestones.repository.ts), so a roll-up failure
+ * here must never be allowed to make the caller believe the task write
+ * itself failed. This catches the error, logs it server-side with enough
+ * context to investigate, and returns a plain-language warning string
+ * instead of throwing — the task mutation methods below thread that
+ * warning back to the Server Action layer, which surfaces it as a
+ * non-blocking notice (never a raw error) rather than swallowing it
+ * silently. execution-reconciliation.service.ts exists specifically to
+ * repair whatever this leaves out of sync.
+ */
+async function recalcMilestoneIfPresent(organizationId: string, actorId: string, milestoneId: string | null | undefined): Promise<string | undefined> {
+  if (!milestoneId) return undefined;
+  try {
+    await milestoneService.recalculateMilestoneProgress(organizationId, actorId, milestoneId, 'task_rollup');
+    return undefined;
+  } catch (error) {
+    console.error('[task.service] milestone roll-up failed after task mutation', { organizationId, milestoneId, error });
+    return 'Saved, but the milestone/project progress could not be refreshed automatically. Run reconciliation from System Health to correct it.';
+  }
 }
 
 /** camelCase input keys -> snake_case DB columns. `founder_required` is
@@ -213,6 +249,11 @@ async function recordTaskActivity(params: {
 }
 
 export const taskService = {
+  /** Returns `{ task, warning }` rather than a bare row — see
+   * recalcMilestoneIfPresent's doc comment above. `warning` is set only
+   * when the task write itself succeeded but its milestone roll-up
+   * failed; every caller (Server Actions) threads this into the UI as a
+   * non-blocking notice, never a hard failure. */
   async createTask(organizationId: string, actorId: string, rawInput: CreateTaskInput) {
     const input = createTaskSchema.parse(rawInput);
     await assertProjectInOrg(organizationId, input.projectId);
@@ -239,9 +280,9 @@ export const taskService = {
       metadata: { project_id: task.project_id, action: 'created' },
     });
 
-    await recalcMilestoneIfPresent(organizationId, actorId, task.milestone_id);
+    const warning = await recalcMilestoneIfPresent(organizationId, actorId, task.milestone_id);
 
-    return task;
+    return { task, warning };
   },
 
   async updateTask(organizationId: string, actorId: string, taskId: string, rawInput: UpdateTaskInput) {
@@ -261,7 +302,7 @@ export const taskService = {
     const { changedFields, previousValues, newValues, finalPatch } = diffPatch(existing as Record<string, unknown>, requestedPatch as Record<string, unknown>);
 
     if (changedFields.length === 0) {
-      return existing;
+      return { task: existing, warning: undefined };
     }
 
     (finalPatch as Record<string, unknown>).last_activity_at = new Date().toISOString();
@@ -285,22 +326,28 @@ export const taskService = {
     // Moving a task between milestones affects both roll-ups; a status
     // change on a task that stayed on the same milestone only affects that
     // one. A task with no milestone at all (before or after) never
-    // triggers any of this — recalcMilestoneIfPresent no-ops on null.
+    // triggers any of this — recalcMilestoneIfPresent no-ops on null. Note
+    // that with getTaskForMutation now supplying a full canonical row,
+    // "moved" to the SAME milestone_id no longer appears in changedFields
+    // at all (it's a genuine no-op), so this branch only ever runs for a
+    // real move.
+    let warning: string | undefined;
     if (changedFields.includes('milestone_id')) {
-      await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
-      await recalcMilestoneIfPresent(organizationId, actorId, updated.milestone_id);
+      const warningFromOld = await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+      const warningFromNew = await recalcMilestoneIfPresent(organizationId, actorId, updated.milestone_id);
+      warning = warningFromOld ?? warningFromNew;
     } else if (changedFields.includes('status')) {
-      await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+      warning = await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
     }
 
-    return updated;
+    return { task: updated, warning };
   },
 
   async updateTaskStatus(organizationId: string, actorId: string, rawInput: UpdateTaskStatusInput) {
     const input = updateTaskStatusSchema.parse(rawInput);
     const existing = await assertTaskInOrg(organizationId, input.taskId);
 
-    if (existing.status === input.status) return existing;
+    if (existing.status === input.status) return { task: existing, warning: undefined };
     assertValidStatusTransition(existing.status as TaskStatus, input.status);
 
     const patch: TablesUpdate<'tasks'> = {
@@ -332,9 +379,9 @@ export const taskService = {
       },
     });
 
-    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+    const warning = await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
-    return updated;
+    return { task: updated, warning };
   },
 
   async updateTaskPriority(organizationId: string, actorId: string, rawInput: UpdateTaskPriorityInput) {
@@ -407,7 +454,7 @@ export const taskService = {
     const input = completeTaskSchema.parse(rawInput);
     const existing = await assertTaskInOrg(organizationId, input.taskId);
 
-    if (existing.status === 'completed') return existing;
+    if (existing.status === 'completed') return { task: existing, warning: undefined };
 
     const completedAt = new Date().toISOString();
     const patch: TablesUpdate<'tasks'> = {
@@ -433,9 +480,9 @@ export const taskService = {
       },
     });
 
-    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+    const warning = await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
-    return updated;
+    return { task: updated, warning };
   },
 
   /** Clears completed_at and returns the task to a real working status.
@@ -472,16 +519,16 @@ export const taskService = {
       },
     });
 
-    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+    const warning = await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
-    return updated;
+    return { task: updated, warning };
   },
 
   async cancelTask(organizationId: string, actorId: string, rawInput: CancelTaskInput) {
     const input = cancelTaskSchema.parse(rawInput);
     const existing = await assertTaskInOrg(organizationId, input.taskId);
 
-    if (existing.status === 'cancelled') return existing;
+    if (existing.status === 'cancelled') return { task: existing, warning: undefined };
 
     const patch: TablesUpdate<'tasks'> = { status: 'cancelled', last_activity_at: new Date().toISOString() };
     const updated = await tasksRepository.update(organizationId, input.taskId, patch);
@@ -503,8 +550,8 @@ export const taskService = {
     // A cancelled task drops out of the milestone's eligible-task set
     // entirely — recalculate so it stops counting in either the numerator
     // or denominator.
-    await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
+    const warning = await recalcMilestoneIfPresent(organizationId, actorId, existing.milestone_id);
 
-    return updated;
+    return { task: updated, warning };
   },
 };

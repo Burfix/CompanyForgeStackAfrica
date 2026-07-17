@@ -3,7 +3,7 @@ import { BusinessRuleError, NotFoundError } from '@/lib/errors';
 
 vi.mock('@/repositories/milestones.repository', () => ({
   milestonesRepository: {
-    getMilestoneById: vi.fn(),
+    getMilestoneForMutation: vi.fn(),
     verifyMilestoneAccess: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -146,13 +146,13 @@ describe('milestoneService.createMilestone', () => {
 
 describe('milestoneService.updateMilestone', () => {
   it('throws NotFoundError when the milestone does not exist in this organization', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
     await expect(milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, {} as never)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('is a no-op when nothing actually changed — no write, no activity', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ title: 'Same title' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ title: 'Same title' }));
 
     const result = await milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, { title: 'Same title' } as never);
 
@@ -162,7 +162,7 @@ describe('milestoneService.updateMilestone', () => {
   });
 
   it('writes an update and logs exactly one activity record for a real change', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow());
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow());
     (milestonesRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ title: 'New title' }));
 
     await milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, { title: 'New title' } as never);
@@ -172,7 +172,7 @@ describe('milestoneService.updateMilestone', () => {
   });
 
   it('rejects setting status directly to completed — must use completeMilestone', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
 
     await expect(
       milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, { status: 'completed' } as never),
@@ -180,7 +180,7 @@ describe('milestoneService.updateMilestone', () => {
   });
 
   it('rejects a bare status change out of completed — must use reopenMilestone', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'completed' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'completed' }));
 
     await expect(
       milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, { status: 'in_progress' } as never),
@@ -188,7 +188,7 @@ describe('milestoneService.updateMilestone', () => {
   });
 
   it('rejects an invalid transition (e.g. pending -> missed)', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'pending' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'pending' }));
 
     await expect(
       milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, { status: 'missed' } as never),
@@ -196,7 +196,7 @@ describe('milestoneService.updateMilestone', () => {
   });
 
   it('allows a valid transition (pending -> in_progress)', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'pending' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'pending' }));
     (milestonesRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
 
     const result = await milestoneService.updateMilestone(ORG_ID, ACTOR_ID, MILESTONE_ID, { status: 'in_progress' } as never);
@@ -206,7 +206,7 @@ describe('milestoneService.updateMilestone', () => {
 
 describe('milestoneService.completeMilestone / reopenMilestone / cancelMilestone', () => {
   it('completeMilestone forces progress to 100 and sets completed_at', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress', progress_percent: 40 }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress', progress_percent: 40 }));
     (milestonesRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'completed', progress_percent: 100 }));
 
     await milestoneService.completeMilestone(ORG_ID, ACTOR_ID, { milestoneId: MILESTONE_ID } as never);
@@ -218,14 +218,14 @@ describe('milestoneService.completeMilestone / reopenMilestone / cancelMilestone
   });
 
   it('completeMilestone is a no-op if already completed', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'completed' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'completed' }));
 
     await milestoneService.completeMilestone(ORG_ID, ACTOR_ID, { milestoneId: MILESTONE_ID } as never);
     expect(milestonesRepository.update).not.toHaveBeenCalled();
   });
 
   it('reopenMilestone rejects a milestone that is not completed or cancelled', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
 
     await expect(
       milestoneService.reopenMilestone(ORG_ID, ACTOR_ID, { milestoneId: MILESTONE_ID, targetStatus: 'in_progress' } as never),
@@ -233,7 +233,7 @@ describe('milestoneService.completeMilestone / reopenMilestone / cancelMilestone
   });
 
   it('reopenMilestone clears completed_at and recalculates progress for an automatic milestone', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>)
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(baseMilestoneRow({ status: 'completed', progress_mode: 'automatic', progress_percent: 100 }))
       .mockResolvedValueOnce(baseMilestoneRow({ status: 'in_progress', progress_mode: 'automatic', progress_percent: 100 }));
     (milestonesRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress', completed_at: null }));
@@ -247,14 +247,14 @@ describe('milestoneService.completeMilestone / reopenMilestone / cancelMilestone
   });
 
   it('cancelMilestone is a no-op if already cancelled', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'cancelled' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'cancelled' }));
 
     await milestoneService.cancelMilestone(ORG_ID, ACTOR_ID, { milestoneId: MILESTONE_ID } as never);
     expect(milestonesRepository.update).not.toHaveBeenCalled();
   });
 
   it('cancelMilestone writes the cancelled status and logs activity', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'in_progress' }));
     (milestonesRepository.update as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ status: 'cancelled' }));
     (milestonesRepository.listByProject as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
@@ -267,7 +267,7 @@ describe('milestoneService.completeMilestone / reopenMilestone / cancelMilestone
 
 describe('milestoneService.recalculateMilestoneProgress', () => {
   it('never overwrites a manual-mode milestone', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_mode: 'manual', progress_percent: 40 }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_mode: 'manual', progress_percent: 40 }));
 
     const result = await milestoneService.recalculateMilestoneProgress(ORG_ID, ACTOR_ID, MILESTONE_ID);
 
@@ -276,7 +276,7 @@ describe('milestoneService.recalculateMilestoneProgress', () => {
   });
 
   it('is a no-op (no write, no activity) when the recalculated value is unchanged', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_mode: 'automatic', progress_percent: 50, status: 'in_progress' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_mode: 'automatic', progress_percent: 50, status: 'in_progress' }));
     (milestonesRepository.getTaskCompletionRollup as ReturnType<typeof vi.fn>).mockResolvedValue({ totalEligibleTasks: 2, completedEligibleTasks: 1 });
 
     await milestoneService.recalculateMilestoneProgress(ORG_ID, ACTOR_ID, MILESTONE_ID);
@@ -286,7 +286,7 @@ describe('milestoneService.recalculateMilestoneProgress', () => {
   });
 
   it('writes and logs exactly once when the recalculated value changes', async () => {
-    (milestonesRepository.getMilestoneById as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_mode: 'automatic', progress_percent: 0, status: 'in_progress' }));
+    (milestonesRepository.getMilestoneForMutation as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_mode: 'automatic', progress_percent: 0, status: 'in_progress' }));
     (milestonesRepository.getTaskCompletionRollup as ReturnType<typeof vi.fn>).mockResolvedValue({ totalEligibleTasks: 4, completedEligibleTasks: 3 });
     (milestonesRepository.updateMilestoneProgress as ReturnType<typeof vi.fn>).mockResolvedValue(baseMilestoneRow({ progress_percent: 75 }));
     (milestonesRepository.listByProject as ReturnType<typeof vi.fn>).mockResolvedValue([]);
