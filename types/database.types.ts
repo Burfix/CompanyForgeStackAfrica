@@ -480,6 +480,69 @@ export type Database = {
         }
         Relationships: []
       }
+      platform_costs: {
+        Row: {
+          amount: number
+          billing_frequency: string
+          cancelled_at: string | null
+          category: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_from: string
+          id: string
+          notes: string | null
+          organization_id: string
+          updated_at: string
+          vendor: string
+        }
+        Insert: {
+          amount: number
+          billing_frequency?: string
+          cancelled_at?: string | null
+          category: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from?: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          updated_at?: string
+          vendor: string
+        }
+        Update: {
+          amount?: number
+          billing_frequency?: string
+          cancelled_at?: string | null
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          updated_at?: string
+          vendor?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_costs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "platform_costs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -863,7 +926,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      platform_costs_monthly_summary: {
+        Row: {
+          organization_id: string | null
+          category: string | null
+          monthly_amount: number | null
+          line_item_count: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
