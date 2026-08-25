@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildRevenueWarRoomState } from './data';
+import { DEFAULT_REVENUE_PIPELINE, buildRevenueWarRoomState } from './data';
 
 describe('Revenue War Room state', () => {
-  const state = buildRevenueWarRoomState(new Date('2026-08-24T08:00:00+02:00'));
+  const state = buildRevenueWarRoomState(DEFAULT_REVENUE_PIPELINE, new Date('2026-08-24T08:00:00+02:00'));
 
   it('forecasts September cash against the R30k target', () => {
     expect(state.targetAmount).toBe(30_000);
@@ -36,8 +36,25 @@ describe('Revenue War Room state', () => {
     });
   });
 
+  it('derives collected and contracted cash from editable deal stages', () => {
+    const stateWithClosedDeal = buildRevenueWarRoomState(
+      DEFAULT_REVENUE_PIPELINE.map((deal) =>
+        deal.id === 'tourvest-assurance-close'
+          ? { ...deal, stage: 'closed' }
+          : deal.id === 'sea-castle-upgrade'
+            ? { ...deal, stage: 'contracted' }
+            : deal,
+      ),
+      new Date('2026-08-24T08:00:00+02:00'),
+    );
+
+    expect(stateWithClosedDeal.cashCollected).toBe(24_000);
+    expect(stateWithClosedDeal.contractedCash).toBe(9_000);
+    expect(stateWithClosedDeal.weightedPipeline).toBe(13_275);
+  });
+
   it('uses Johannesburg date boundaries instead of UTC around midnight', () => {
-    const afterMidnightSast = buildRevenueWarRoomState(new Date('2026-08-25T22:21:00.000Z'));
+    const afterMidnightSast = buildRevenueWarRoomState(DEFAULT_REVENUE_PIPELINE, new Date('2026-08-25T22:21:00.000Z'));
 
     expect(afterMidnightSast.daysRemaining).toBe(35);
     expect(afterMidnightSast.deals.find((deal) => deal.id === 'airport-precinct-pilot')?.daysUntilNextAction).toBe(0);

@@ -1,6 +1,6 @@
-export type DealStage = 'lead' | 'discovery' | 'demo' | 'proposal' | 'procurement' | 'contracted' | 'closed';
+import type { DealStage, WorkflowOwner } from '@/schemas/revenue-deal.schema';
 
-export type WorkflowOwner = 'Thami' | 'Customer Development' | 'EA' | 'Cybersecurity';
+export type { DealStage, WorkflowOwner };
 
 export interface RevenueDeal {
   id: string;
@@ -58,7 +58,7 @@ const TARGET_AMOUNT = 30_000;
 const PERIOD_END_DATE = '2026-09-30';
 const WAR_ROOM_TIME_ZONE = 'Africa/Johannesburg';
 
-const PIPELINE: RevenueDeal[] = [
+export const DEFAULT_REVENUE_PIPELINE: RevenueDeal[] = [
   {
     id: 'tourvest-assurance-close',
     account: 'Tourvest Hospitality Group',
@@ -160,11 +160,11 @@ function todayInWarRoomTimezone(today: Date): string {
   return today.toLocaleDateString('en-CA', { timeZone: WAR_ROOM_TIME_ZONE });
 }
 
-export function buildRevenueWarRoomState(today = new Date()): RevenueWarRoomState {
+export function buildRevenueWarRoomState(dealsInput: RevenueDeal[] = DEFAULT_REVENUE_PIPELINE, today = new Date()): RevenueWarRoomState {
   const normalizedToday = asSastDate(todayInWarRoomTimezone(today));
   const periodEnd = asSastDate(PERIOD_END_DATE);
 
-  const deals = PIPELINE.map((deal) => {
+  const deals = dealsInput.map((deal) => {
     const daysUntilNextAction = daysBetween(normalizedToday, asSastDate(deal.nextActionDate));
     const daysSinceMovement = Math.max(0, daysBetween(asSastDate(deal.lastMovedDate), normalizedToday));
     const weightedValue = Math.round(deal.dealValue * deal.probability);
@@ -183,9 +183,11 @@ export function buildRevenueWarRoomState(today = new Date()): RevenueWarRoomStat
     };
   });
 
-  const cashCollected = 0;
+  const cashCollected = deals
+    .filter((deal) => deal.stage === 'closed')
+    .reduce((sum, deal) => sum + deal.dealValue, 0);
   const contractedCash = deals
-    .filter((deal) => deal.stage === 'contracted' || deal.stage === 'closed')
+    .filter((deal) => deal.stage === 'contracted')
     .reduce((sum, deal) => sum + deal.dealValue, 0);
   const mrrClosed = deals
     .filter((deal) => deal.stage === 'contracted' || deal.stage === 'closed')

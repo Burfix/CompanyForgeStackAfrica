@@ -1,8 +1,11 @@
 import { BriefcaseBusiness, CalendarClock, CircleDollarSign, Handshake, TrendingUp, TriangleAlert } from 'lucide-react';
-import { requireUser } from '@/lib/auth/session';
+import { getCurrentOrg, requireUser } from '@/lib/auth/session';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { buildRevenueWarRoomState, type DealStage, type WorkflowOwner } from '@/features/revenue-war-room/data';
+import { createRevenueDealAction, deleteRevenueDealAction, updateRevenueDealAction } from '@/features/revenue-war-room/actions';
+import { DEAL_STAGE_VALUES, WORKFLOW_OWNER_VALUES } from '@/schemas/revenue-deal.schema';
+import { revenueDealsRepository } from '@/repositories/revenue-deals.repository';
 
 const STAGE_LABEL: Record<DealStage, string> = {
   lead: 'Lead',
@@ -47,6 +50,10 @@ function dateLabel(value: string): string {
   });
 }
 
+function todayIso(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
 function MetricCard({
   title,
   value,
@@ -86,10 +93,115 @@ function OwnerBadge({ owner }: { owner: WorkflowOwner }) {
   return <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', OWNER_TONE[owner])}>{owner}</span>;
 }
 
+function Field({
+  label,
+  name,
+  defaultValue,
+  type = 'text',
+  children,
+}: {
+  label: string;
+  name: string;
+  defaultValue?: string | number;
+  type?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      {children ?? (
+        <input
+          name={name}
+          type={type}
+          defaultValue={defaultValue}
+          className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none ring-0 focus:border-primary"
+        />
+      )}
+    </label>
+  );
+}
+
+function StageSelect({ defaultValue }: { defaultValue: DealStage }) {
+  return (
+    <select name="stage" defaultValue={defaultValue} className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
+      {DEAL_STAGE_VALUES.map((stage) => (
+        <option key={stage} value={stage}>
+          {STAGE_LABEL[stage]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function OwnerSelect({ defaultValue }: { defaultValue: WorkflowOwner }) {
+  return (
+    <select name="owner" defaultValue={defaultValue} className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
+      {WORKFLOW_OWNER_VALUES.map((owner) => (
+        <option key={owner} value={owner}>
+          {owner}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function DealFields({
+  deal,
+}: {
+  deal: {
+    account: string;
+    dealValue: number;
+    monthlyRecurringRevenue: number;
+    stage: DealStage;
+    probability: number;
+    nextAction: string;
+    owner: WorkflowOwner;
+    nextActionDate: string;
+    expectedCloseDate: string;
+    expectedPaymentDate: string;
+    lastMovedDate: string;
+    blocker?: string;
+  };
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <Field label="Account" name="account" defaultValue={deal.account} />
+      <Field label="Deal value" name="dealValue" type="number" defaultValue={deal.dealValue} />
+      <Field label="MRR" name="monthlyRecurringRevenue" type="number" defaultValue={deal.monthlyRecurringRevenue} />
+      <Field label="Probability %" name="probability" type="number" defaultValue={Math.round(deal.probability * 100)} />
+      <Field label="Stage" name="stage">
+        <StageSelect defaultValue={deal.stage} />
+      </Field>
+      <Field label="Owner" name="owner">
+        <OwnerSelect defaultValue={deal.owner} />
+      </Field>
+      <Field label="Next action date" name="nextActionDate" type="date" defaultValue={deal.nextActionDate} />
+      <Field label="Last moved" name="lastMovedDate" type="date" defaultValue={deal.lastMovedDate} />
+      <Field label="Expected close" name="expectedCloseDate" type="date" defaultValue={deal.expectedCloseDate} />
+      <Field label="Expected payment" name="expectedPaymentDate" type="date" defaultValue={deal.expectedPaymentDate} />
+      <div className="md:col-span-2">
+        <Field label="Blocker" name="blocker" defaultValue={deal.blocker ?? ''} />
+      </div>
+      <label className="flex flex-col gap-1 md:col-span-2 xl:col-span-4">
+        <span className="text-xs text-muted-foreground">Next action</span>
+        <textarea
+          name="nextAction"
+          defaultValue={deal.nextAction}
+          rows={2}
+          className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+        />
+      </label>
+    </div>
+  );
+}
+
 export default async function RevenueWarRoomPage() {
   await requireUser();
-  const state = buildRevenueWarRoomState();
+  const org = await getCurrentOrg();
+  const deals = await revenueDealsRepository.listByOrg(org.organizationId);
+  const state = buildRevenueWarRoomState(deals);
   const forecastCoverage = Math.min(100, Math.round((state.projectedCash / state.targetAmount) * 100));
+  const today = todayIso();
 
   return (
     <div className="flex flex-col gap-8">
@@ -178,7 +290,7 @@ export default async function RevenueWarRoomPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <CardTitle>Live Pipeline</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Stale means no stage movement for 3+ days.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Edit a deal and save; the top-row figures recalculate from the stored pipeline.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               {(['Thami', 'Customer Development', 'EA', 'Cybersecurity'] as WorkflowOwner[]).map((owner) => (
@@ -187,50 +299,61 @@ export default async function RevenueWarRoomPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1080px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="py-3 pr-4 font-medium">Account</th>
-                  <th className="py-3 pr-4 font-medium">Deal</th>
-                  <th className="py-3 pr-4 font-medium">Stage</th>
-                  <th className="py-3 pr-4 font-medium">Prob.</th>
-                  <th className="py-3 pr-4 font-medium">Weighted</th>
-                  <th className="py-3 pr-4 font-medium">Owner</th>
-                  <th className="py-3 pr-4 font-medium">Next Action</th>
-                  <th className="py-3 pr-4 font-medium">Action</th>
-                  <th className="py-3 pr-4 font-medium">Close</th>
-                  <th className="py-3 pr-4 font-medium">Payment</th>
-                  <th className="py-3 font-medium">Flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.deals.map((deal) => (
-                  <tr key={deal.id} className="border-b border-border align-top last:border-0">
-                    <td className="py-3 pr-4 font-medium text-foreground">{deal.account}</td>
-                    <td className="py-3 pr-4 tabular-nums text-muted-foreground">{zar(deal.dealValue)}</td>
-                    <td className="py-3 pr-4">
-                      <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', STAGE_TONE[deal.stage])}>{STAGE_LABEL[deal.stage]}</span>
-                    </td>
-                    <td className="py-3 pr-4 tabular-nums text-muted-foreground">{Math.round(deal.probability * 100)}%</td>
-                    <td className="py-3 pr-4 font-medium tabular-nums text-foreground">{zar(deal.weightedValue)}</td>
-                    <td className="py-3 pr-4"><OwnerBadge owner={deal.owner} /></td>
-                    <td className="max-w-xs py-3 pr-4 text-muted-foreground">{deal.nextAction}</td>
-                    <td className={cn('py-3 pr-4 tabular-nums', deal.overdue ? 'font-medium text-red-400' : 'text-muted-foreground')}>{dateLabel(deal.nextActionDate)}</td>
-                    <td className="py-3 pr-4 tabular-nums text-muted-foreground">{dateLabel(deal.expectedCloseDate)}</td>
-                    <td className="py-3 pr-4 tabular-nums text-muted-foreground">{dateLabel(deal.expectedPaymentDate)}</td>
-                    <td className="py-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        {deal.stale ? <span className="rounded border border-red-500/30 bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-300">Stale {deal.daysSinceMovement}d</span> : null}
-                        {deal.blocker ? <span className="rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-300">Blocked</span> : null}
-                        {!deal.needsAction ? <span className="rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-300">Moving</span> : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <CardContent className="flex flex-col gap-4">
+          {state.deals.map((deal) => (
+            <div key={deal.id} className="rounded-lg border border-border bg-secondary/40 p-4">
+              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">{deal.account}</p>
+                  <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', STAGE_TONE[deal.stage])}>{STAGE_LABEL[deal.stage]}</span>
+                  <OwnerBadge owner={deal.owner} />
+                  {deal.stale ? <span className="rounded border border-red-500/30 bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-300">Stale {deal.daysSinceMovement}d</span> : null}
+                  {deal.blocker ? <span className="rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-300">Blocked</span> : null}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {zar(deal.dealValue)} · {Math.round(deal.probability * 100)}% · {zar(deal.weightedValue)} weighted
+                </p>
+              </div>
+              <form action={updateRevenueDealAction.bind(null, deal.id)} className="flex flex-col gap-4">
+                <DealFields deal={deal} />
+                <div className="flex justify-end gap-2">
+                  <button type="submit" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+                    Save deal
+                  </button>
+                </div>
+              </form>
+              <form action={deleteRevenueDealAction.bind(null, deal.id)} className="mt-2 flex justify-end">
+                <button type="submit" className="text-xs font-medium text-red-400 hover:text-red-300">
+                  Delete deal
+                </button>
+              </form>
+            </div>
+          ))}
+          <div className="rounded-lg border border-dashed border-border bg-background/40 p-4">
+            <p className="mb-4 text-sm font-medium text-foreground">Add Deal</p>
+            <form action={createRevenueDealAction} className="flex flex-col gap-4">
+              <DealFields
+                deal={{
+                  account: '',
+                  dealValue: 0,
+                  monthlyRecurringRevenue: 0,
+                  stage: 'lead',
+                  probability: 0,
+                  nextAction: '',
+                  owner: 'Thami',
+                  nextActionDate: today,
+                  expectedCloseDate: '2026-09-30',
+                  expectedPaymentDate: '2026-09-30',
+                  lastMovedDate: today,
+                  blocker: '',
+                }}
+              />
+              <div className="flex justify-end">
+                <button type="submit" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+                  Add deal
+                </button>
+              </div>
+            </form>
           </div>
         </CardContent>
       </Card>
