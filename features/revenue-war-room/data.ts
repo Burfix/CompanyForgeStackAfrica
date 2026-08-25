@@ -56,6 +56,7 @@ export interface RevenueWarRoomState {
 
 const TARGET_AMOUNT = 30_000;
 const PERIOD_END_DATE = '2026-09-30';
+const WAR_ROOM_TIME_ZONE = 'Africa/Johannesburg';
 
 const PIPELINE: RevenueDeal[] = [
   {
@@ -155,8 +156,12 @@ function daysBetween(from: Date, to: Date): number {
   return Math.ceil((to.getTime() - from.getTime()) / 86_400_000);
 }
 
+function todayInWarRoomTimezone(today: Date): string {
+  return today.toLocaleDateString('en-CA', { timeZone: WAR_ROOM_TIME_ZONE });
+}
+
 export function buildRevenueWarRoomState(today = new Date()): RevenueWarRoomState {
-  const normalizedToday = asSastDate(today.toISOString().slice(0, 10));
+  const normalizedToday = asSastDate(todayInWarRoomTimezone(today));
   const periodEnd = asSastDate(PERIOD_END_DATE);
 
   const deals = PIPELINE.map((deal) => {

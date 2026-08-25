@@ -35,4 +35,11 @@ describe('Revenue War Room state', () => {
       weightedValue: 16_800,
     });
   });
+
+  it('uses Johannesburg date boundaries instead of UTC around midnight', () => {
+    const afterMidnightSast = buildRevenueWarRoomState(new Date('2026-08-25T22:21:00.000Z'));
+
+    expect(afterMidnightSast.daysRemaining).toBe(35);
+    expect(afterMidnightSast.deals.find((deal) => deal.id === 'airport-precinct-pilot')?.daysUntilNextAction).toBe(0);
+  });
 });

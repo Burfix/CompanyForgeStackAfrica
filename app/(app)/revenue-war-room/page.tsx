@@ -40,7 +40,11 @@ function zar(value: number): string {
 }
 
 function dateLabel(value: string): string {
-  return new Date(`${value}T00:00:00+02:00`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
+  return new Date(`${value}T00:00:00+02:00`).toLocaleDateString('en-ZA', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'Africa/Johannesburg',
+  });
 }
 
 function MetricCard({
@@ -111,7 +115,7 @@ export default async function RevenueWarRoomPage() {
         <MetricCard title="Deals Needing Action" value={String(state.dealsNeedingAction)} detail="Due, stale, overdue or blocked" tone={state.dealsNeedingAction > 0 ? 'danger' : 'positive'} icon={TriangleAlert} />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_0.95fr]">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr_0.95fr]">
         <Card>
           <CardHeader>
             <CardTitle>September Cash Forecast</CardTitle>
