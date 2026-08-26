@@ -160,7 +160,7 @@ function todayInWarRoomTimezone(today: Date): string {
   return today.toLocaleDateString('en-CA', { timeZone: WAR_ROOM_TIME_ZONE });
 }
 
-export function buildRevenueWarRoomState(dealsInput: RevenueDeal[] = DEFAULT_REVENUE_PIPELINE, today = new Date()): RevenueWarRoomState {
+export function buildRevenueWarRoomState(dealsInput: RevenueDeal[] = [], today = new Date()): RevenueWarRoomState {
   const normalizedToday = asSastDate(todayInWarRoomTimezone(today));
   const periodEnd = asSastDate(PERIOD_END_DATE);
 

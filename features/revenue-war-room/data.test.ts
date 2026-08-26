@@ -4,6 +4,16 @@ import { DEFAULT_REVENUE_PIPELINE, buildRevenueWarRoomState } from './data';
 describe('Revenue War Room state', () => {
   const state = buildRevenueWarRoomState(DEFAULT_REVENUE_PIPELINE, new Date('2026-08-24T08:00:00+02:00'));
 
+  it('starts empty when no real pipeline data exists', () => {
+    const emptyState = buildRevenueWarRoomState([], new Date('2026-08-24T08:00:00+02:00'));
+
+    expect(emptyState.cashCollected).toBe(0);
+    expect(emptyState.weightedPipeline).toBe(0);
+    expect(emptyState.projectedCash).toBe(0);
+    expect(emptyState.dealsNeedingAction).toBe(0);
+    expect(emptyState.todayActions).toEqual([]);
+  });
+
   it('forecasts September cash against the R30k target', () => {
     expect(state.targetAmount).toBe(30_000);
     expect(state.daysRemaining).toBe(37);

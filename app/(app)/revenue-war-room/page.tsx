@@ -266,6 +266,11 @@ export default async function RevenueWarRoomPage() {
             <CardTitle>Today</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            {state.todayActions.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-secondary/30 px-3 py-6 text-sm text-muted-foreground">
+                No revenue actions are due. Add real opportunities below to build today&apos;s founder priority list.
+              </div>
+            ) : null}
             {state.todayActions.map((item, index) => (
               <div key={item.dealId} className="flex gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-3">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">{index + 1}</div>
